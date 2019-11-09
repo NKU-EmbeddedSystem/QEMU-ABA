@@ -45,6 +45,10 @@
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
 
+/* Globals */
+int ldex_count;
+int stex_count;
+
 char *exec_path;
 
 int singlestep;

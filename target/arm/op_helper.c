@@ -1002,3 +1002,21 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
     memset(g2h(vaddr), 0, blocklen);
 #endif
 }
+
+void HELPER(offload_load_exclusive_count)(uint32_t addr)
+{
+    //extern int ldex_count;
+    //ldex_count++;
+    //fprintf(stderr, "helper_offload_load_exclusive\taddr %p, value %p\n", addr, *(int*)(g2h(addr)));
+}
+
+void HELPER(offload_store_exclusive_count)(uint32_t addr)
+{
+    //extern int stex_count;
+    //stex_count++;
+}
+
+void HELPER(print_aa32_addr)(uint32_t addr)
+{
+    fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
+}

@@ -3023,6 +3023,21 @@ typedef void (*gen_atomic_op_i64)(TCGv_i64, TCGv_env, TCGv, TCGv_i64);
 # define WITH_ATOMIC64(X)
 #endif
 
+void tcg_gen_ldex_count(TCGv addr)
+{
+    gen_helper_offload_load_exclusive_count(addr);
+}
+
+void tcg_gen_stex_count(TCGv addr)
+{
+    gen_helper_offload_store_exclusive_count(addr);
+}
+
+void tcg_gen_print_aa32_addr(TCGv_i32 addr)
+{
+    gen_helper_print_aa32_addr(addr);
+}
+
 static void * const table_cmpxchg[16] = {
     [MO_8] = gen_helper_atomic_cmpxchgb,
     [MO_16 | MO_LE] = gen_helper_atomic_cmpxchgw_le,

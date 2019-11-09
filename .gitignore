@@ -139,6 +139,7 @@ tags
 TAGS
 docker-src.*
 *~
+*.mak
 *.ast_raw
 *.depend_raw
 trace.h

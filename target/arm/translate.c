@@ -37,6 +37,7 @@
 #include "trace-tcg.h"
 #include "exec/log.h"
 
+//#define HASH_LLSC
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -1115,6 +1116,23 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
         !arm_dc_feature(s, ARM_FEATURE_M_MAIN)) {
         opc |= MO_ALIGN;
     }
+	/* A Hash approach to avoid ABA problem. */
+#ifdef HASH_LLSC
+    TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
+    TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
+    TCGv_i32 hash_addr = tcg_temp_new_i32();
+    TCGv_i32 fake_tid = tcg_const_i32(0x123);
+
+    //tcg_gen_ldex_count(addr);
+    tcg_gen_and_i32(hash_addr, addr, mask1);
+    tcg_gen_or_i32(hash_addr, hash_addr, mask2);
+    tcg_gen_ldex_count(hash_addr);
+    tcg_gen_qemu_st_i32(fake_tid, hash_addr, index, opc);
+    tcg_temp_free(mask1);
+    tcg_temp_free(mask2);
+    tcg_temp_free(hash_addr);
+    tcg_temp_free(fake_tid);
+#endif /* HASH_LLSC */
 
     addr = gen_aa32_addr(s, a32, opc);
     tcg_gen_qemu_st_i32(val, addr, index, opc);
@@ -7436,8 +7454,26 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 {
     TCGv_i32 tmp = tcg_temp_new_i32();
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
+#ifdef HASH_LLSC
+    TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
+    TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
+    TCGv_i32 hash_addr = tcg_temp_new_i32();
+    TCGv_i32 fake_tid = tcg_const_i32(0x123);
+#endif
 
     s->is_ldex = true;
+#ifdef HASH_LLSC
+    //tcg_gen_ldex_count(addr);
+    //hash method
+    tcg_gen_and_i32(hash_addr, addr, mask1);
+    tcg_gen_or_i32(hash_addr, hash_addr, mask2);
+    tcg_gen_ldex_count(hash_addr);
+    gen_aa32_st32(s, fake_tid, hash_addr, get_mem_index(s));
+    tcg_temp_free(mask1);
+    tcg_temp_free(mask2);
+    tcg_temp_free(hash_addr);
+    tcg_temp_free(fake_tid);
+#endif
 
     if (size == 3) {
         TCGv_i32 tmp2 = tcg_temp_new_i32();
@@ -7490,6 +7526,10 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     TCGLabel *done_label;
     TCGLabel *fail_label;
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
+
+#ifdef HASH_LLSC
+	tcg_gen_stex_count(addr);
+#endif
 
     /* if (env->exclusive_addr == addr && env->exclusive_val == [addr]) {
          [addr] = {Rt};
