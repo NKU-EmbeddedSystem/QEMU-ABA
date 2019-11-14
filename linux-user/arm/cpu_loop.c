@@ -205,6 +205,94 @@ do_kernel_trap(CPUARMState *env)
     return 0;
 }
 
+/* Store exclusive handling for AArch32 */
+static int do_strex(CPUARMState *env)
+{
+    uint64_t val;
+    int size;
+    int rc = 1;
+    int segv = 0;
+    uint32_t addr;
+    //fprintf(stderr, "[do_strex]\tdo_strex\n");
+    start_exclusive();
+    if (env->exclusive_addr != env->exclusive_test) {
+        goto fail;
+    }
+    /* We know we're always AArch32 so the address is in uint32_t range
+     * unless it was the -1 exclusive-monitor-lost value (which won't
+     * match exclusive_test above).
+     */
+    assert(extract64(env->exclusive_addr, 32, 32) == 0);
+    addr = env->exclusive_addr;
+    size = env->exclusive_info & 0xf;
+    switch (size) {
+    case 0:
+        segv = get_user_u8(val, addr);
+        break;
+    case 1:
+        segv = get_user_u16(val, addr);
+        break;
+    case 2:
+    case 3:
+        segv = get_user_u32(val, addr);
+        break;
+    default:
+        abort();
+    }
+    if (segv) {
+        env->exception.vaddress = addr;
+        goto done;
+    }
+    if (size == 3) {
+        uint32_t valhi;
+        segv = get_user_u32(valhi, addr + 4);
+        if (segv) {
+            env->exception.vaddress = addr + 4;
+            goto done;
+        }
+        val = deposit64(val, 32, 32, valhi);
+    }
+    if (val != env->exclusive_val) {
+        goto fail;
+    }
+
+    val = env->regs[(env->exclusive_info >> 8) & 0xf];
+    switch (size) {
+    case 0:
+        segv = put_user_u8(val, addr);
+        break;
+    case 1:
+        segv = put_user_u16(val, addr);
+        break;
+    case 2:
+    case 3:
+        segv = put_user_u32(val, addr);
+        break;
+    }
+    if (segv) {
+        env->exception.vaddress = addr;
+        goto done;
+    }
+    if (size == 3) {
+        val = env->regs[(env->exclusive_info >> 12) & 0xf];
+        segv = put_user_u32(val, addr + 4);
+        if (segv) {
+            env->exception.vaddress = addr + 4;
+            goto done;
+        }
+    }
+    rc = 0;
+fail:
+    env->regs[15] += 4;
+    env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
+	//fprintf(stderr, "strex fail!");
+	
+done:
+	//fprintf(stderr, "strex done!\n");
+    end_exclusive();
+    return segv;
+}
+
 void cpu_loop(CPUARMState *env)
 {
     CPUState *cs = env_cpu(env);
@@ -413,6 +501,11 @@ void cpu_loop(CPUARMState *env)
         case EXCP_ATOMIC:
             cpu_exec_step_atomic(cs);
             break;
+		case EXCP_STREX:
+            if (!do_strex(env)) {
+                break;
+            }
+            /* fall through for segv */
         default:
         error:
             EXCP_DUMP(env, "qemu: unhandled CPU exception 0x%x - aborting\n", trapnr);

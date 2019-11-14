@@ -7639,6 +7639,7 @@ void arm_log_exception(int idx)
             [EXCP_LAZYFP] = "v7M exception during lazy FP stacking",
             [EXCP_LSERR] = "v8M LSERR UsageFault",
             [EXCP_UNALIGNED] = "v7M UNALIGNED UsageFault",
+			[EXCP_STREX] = "Store_exclusive atomic check",
         };
 
         if (idx >= 0 && idx < ARRAY_SIZE(excnames)) {

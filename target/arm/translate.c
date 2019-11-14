@@ -40,6 +40,7 @@
 //#define HASH_LLSC
 //#define PF_LLSC
 //#define PICO_ST_LLSC
+#define QEMU_LLSC
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -68,6 +69,10 @@ static TCGv_i32 cpu_R[16];
 TCGv_i32 cpu_CF, cpu_NF, cpu_VF, cpu_ZF;
 TCGv_i64 cpu_exclusive_addr;
 TCGv_i64 cpu_exclusive_val;
+#ifdef QEMU_LLSC
+static TCGv_i64 cpu_exclusive_test;
+static TCGv_i32 cpu_exclusive_info;
+#endif
 
 #include "exec/gen-icount.h"
 
@@ -100,6 +105,12 @@ void arm_translate_init(void)
         offsetof(CPUARMState, exclusive_addr), "exclusive_addr");
     cpu_exclusive_val = tcg_global_mem_new_i64(cpu_env,
         offsetof(CPUARMState, exclusive_val), "exclusive_val");
+#ifdef QEMU_LLSC
+    cpu_exclusive_test = tcg_global_mem_new_i64(cpu_env,
+        offsetof(CPUARMState, exclusive_test), "exclusive_test");
+    cpu_exclusive_info = tcg_global_mem_new_i32(cpu_env,
+        offsetof(CPUARMState, exclusive_info), "exclusive_info");
+#endif
 
     a64_translate_init();
 }
@@ -7482,6 +7493,8 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 
 
     if (size == 3) {
+		fprintf(stderr, "! I don't wanna deal with this situation!\n");
+		exit(233);
         TCGv_i32 tmp2 = tcg_temp_new_i32();
         TCGv_i64 t64 = tcg_temp_new_i64();
 
@@ -7523,6 +7536,16 @@ static void gen_clrex(DisasContext *s)
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
 
+#ifdef QEMU_LLSC
+static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
+                                TCGv_i32 addr, int size)
+{
+    tcg_gen_extu_i32_i64(cpu_exclusive_test, addr);
+    tcg_gen_movi_i32(cpu_exclusive_info,
+                     size | (rd << 4) | (rt << 8) | (rt2 << 12));
+    gen_exception_internal_insn(s, 4, EXCP_STREX);
+}
+#else
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
 {
@@ -7605,6 +7628,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     gen_set_label(done_label);
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
+#endif
 
 /* gen_srs:
  * @env: CPUARMState

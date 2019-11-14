@@ -49,6 +49,8 @@
 #define EXCP_LAZYFP         20   /* v7M fault during lazy FP stacking */
 #define EXCP_LSERR          21   /* v8M LSERR SecureFault */
 #define EXCP_UNALIGNED      22   /* v7M UNALIGNED UsageFault */
+#define EXCP_STREX			23	 /* Store_exclusive atomic check */
+#define EXCP_LDREX			24   /* Load_link atomic op */
 /* NB: add new EXCP_ defines to the array in arm_log_exception() too */
 
 #define ARMV7M_EXCP_RESET   1
@@ -611,9 +613,12 @@ typedef struct CPUARMState {
         /* ZCR_EL[1-3] */
         uint64_t zcr_el[4];
     } vfp;
+	uint32_t exclusive_id;
     uint64_t exclusive_addr;
     uint64_t exclusive_val;
     uint64_t exclusive_high;
+    uint64_t exclusive_test;
+    uint32_t exclusive_info;
 
     /* iwMMXt coprocessor state.  */
     struct {
