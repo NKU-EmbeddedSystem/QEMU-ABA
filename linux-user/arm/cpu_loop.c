@@ -234,7 +234,7 @@ static int do_ldrex(CPUARMState *env)
 	//fprintf(stderr, "ldrex reg = %d, reg15 = %d, val = %ld!, addr = %x\n",
 	//		(env->exclusive_info) & 0xf , env->regs[15], val, addr);
 
-	//fprintf(stderr, "ldrex done!\n");
+	fprintf(stderr, "thread %d ldrex done! val %lx, addr %x\n", env->exclusive_tid, env->exclusive_val, addr);
     end_exclusive();
     return segv;
 }
@@ -250,6 +250,7 @@ static int do_strex(CPUARMState *env)
     //fprintf(stderr, "[do_strex]\tdo_strex\n");
     start_exclusive();
     if (env->exclusive_addr != env->exclusive_test) {
+		fprintf(stderr, "thread %d strex fail!\n", env->exclusive_tid);
         goto fail;
     }
     /* We know we're always AArch32 so the address is in uint32_t range
@@ -287,10 +288,12 @@ static int do_strex(CPUARMState *env)
         val = deposit64(val, 32, 32, valhi);
     }
     if (val != env->exclusive_val) {
+	fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
         goto fail;
     }
 
     val = env->regs[(env->exclusive_info >> 8) & 0xf];
+	fprintf(stderr, "thread %d strex suc! newval %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
     switch (size) {
     case 0:
         segv = put_user_u8(val, addr);
@@ -319,10 +322,8 @@ static int do_strex(CPUARMState *env)
 fail:
     env->regs[15] += 4;
     env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
-	//fprintf(stderr, "strex fail!");
 	
 done:
-	//fprintf(stderr, "strex done!\n");
     end_exclusive();
     return segv;
 }

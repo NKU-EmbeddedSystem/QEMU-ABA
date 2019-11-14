@@ -62,6 +62,7 @@ static const char *seed_optarg;
 unsigned long mmap_min_addr;
 unsigned long guest_base;
 int have_guest_base;
+uint32_t tid;
 
 /*
  * When running 32-on-64 we should make sure we can fit all of the possible
@@ -168,6 +169,7 @@ void task_settid(TaskState *ts)
 {
     if (ts->ts_tid == 0) {
         ts->ts_tid = (pid_t)syscall(SYS_gettid);
+		tid = ts->ts_tid;
     }
 }
 
@@ -786,6 +788,8 @@ int main(int argc, char **argv, char **envp)
     ts->bprm = &bprm;
     cpu->opaque = ts;
     task_settid(ts);
+	assert(tid != 0);
+	env->exclusive_tid = tid;
 
     ret = loader_exec(execfd, filename, target_argv, target_environ, regs,
         info, &bprm);

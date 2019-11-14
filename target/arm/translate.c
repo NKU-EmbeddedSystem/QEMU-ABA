@@ -70,6 +70,7 @@ static TCGv_i32 cpu_R[16];
 TCGv_i32 cpu_CF, cpu_NF, cpu_VF, cpu_ZF;
 TCGv_i64 cpu_exclusive_addr;
 TCGv_i64 cpu_exclusive_val;
+static TCGv_i32 cpu_exclusive_tid;
 #ifdef QEMU_LLSC
 static TCGv_i64 cpu_exclusive_test;
 static TCGv_i32 cpu_exclusive_info;
@@ -106,6 +107,8 @@ void arm_translate_init(void)
         offsetof(CPUARMState, exclusive_addr), "exclusive_addr");
     cpu_exclusive_val = tcg_global_mem_new_i64(cpu_env,
         offsetof(CPUARMState, exclusive_val), "exclusive_val");
+    cpu_exclusive_tid = tcg_global_mem_new_i32(cpu_env,
+        offsetof(CPUARMState, exclusive_tid), "exclusive_tid");
 #ifdef QEMU_LLSC
     cpu_exclusive_test = tcg_global_mem_new_i64(cpu_env,
         offsetof(CPUARMState, exclusive_test), "exclusive_test");
@@ -1137,13 +1140,14 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
     TCGv_i32 hash_addr = tcg_temp_new_i32();
-    TCGv_i32 fake_tid = tcg_const_i32(0x123);
+    //TCGv_i32 fake_tid = tcg_const_i32(0x123);
 
     //tcg_gen_ldex_count(addr);
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
     //tcg_gen_ldex_count(hash_addr);
-    tcg_gen_qemu_st_i32(fake_tid, hash_addr, index, opc);
+    //tcg_gen_qemu_st_i32(fake_tid, hash_addr, index, opc);
+    tcg_gen_qemu_st_i32(exclusive_tid, hash_addr, index, opc);
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
