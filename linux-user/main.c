@@ -838,6 +838,10 @@ int main(int argc, char **argv, char **envp)
         }
         gdb_handlesig(cpu, 0);
     }
+	uint32_t ret_mmp = target_mmap(0xa0000000, 
+						0x10000000, PROT_READ|PROT_WRITE,
+						MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+	assert(ret_mmp == 0xa0000000);
     cpu_loop(env);
     /* never exits */
     return 0;
