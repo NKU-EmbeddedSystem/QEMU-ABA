@@ -7640,6 +7640,7 @@ void arm_log_exception(int idx)
             [EXCP_LSERR] = "v8M LSERR UsageFault",
             [EXCP_UNALIGNED] = "v7M UNALIGNED UsageFault",
 			[EXCP_STREX] = "Store_exclusive atomic check",
+			[EXCP_LDREX] = "Load_exclusive atomic check",
         };
 
         if (idx >= 0 && idx < ARRAY_SIZE(excnames)) {

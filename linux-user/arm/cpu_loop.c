@@ -205,6 +205,40 @@ do_kernel_trap(CPUARMState *env)
     return 0;
 }
 
+/* Load exclusive handling for AArch32 */
+static int do_ldrex(CPUARMState *env)
+{
+    uint64_t val;
+    int segv = 0;
+    uint32_t addr;
+#ifdef HASH_LLSC
+	uint32_t hash_addr;
+#endif
+    //fprintf(stderr, "do_ldrex\n");
+    start_exclusive();
+
+    addr = env->exclusive_addr;
+
+    segv = get_user_u32(val, addr);
+	assert(segv == 0);
+	env->exclusive_val = val;
+
+#ifdef HASH_LLSC
+	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
+    segv = put_user_u32(val, hash_addr);
+	assert(segv == 0);
+#endif
+	
+    env->regs[15] += 4;
+    env->regs[(env->exclusive_info) & 0xf] = val;
+	//fprintf(stderr, "ldrex reg = %d, reg15 = %d, val = %ld!, addr = %x\n",
+	//		(env->exclusive_info) & 0xf , env->regs[15], val, addr);
+
+	//fprintf(stderr, "ldrex done!\n");
+    end_exclusive();
+    return segv;
+}
+
 /* Store exclusive handling for AArch32 */
 static int do_strex(CPUARMState *env)
 {
@@ -501,6 +535,14 @@ void cpu_loop(CPUARMState *env)
         case EXCP_ATOMIC:
             cpu_exec_step_atomic(cs);
             break;
+		case EXCP_LDREX:
+			if (!do_ldrex(env)) {
+				break;
+			}
+			else {
+				EXCP_DUMP(env, "qemu: unhandled CPU exception 0x%x - aborting\n", trapnr);
+            	abort();
+			}
 		case EXCP_STREX:
             if (!do_strex(env)) {
                 break;

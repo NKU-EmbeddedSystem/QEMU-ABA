@@ -41,6 +41,7 @@
 //#define PF_LLSC
 //#define PICO_ST_LLSC
 #define QEMU_LLSC
+#define ATOMIC_LDREX
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -7462,6 +7463,19 @@ static void gen_logicq_cc(TCGv_i32 lo, TCGv_i32 hi)
    the architecturally mandated semantics, and avoids having to monitor
    regular stores.  The compare vs the remembered value is done during
    the cmpxchg operation, but we must compare the addresses manually.  */
+#ifdef ATOMIC_LDREX
+static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
+                               TCGv_i32 addr, int size)
+{
+    if (size == 3) {
+		fprintf(stderr, "! I don't wanna deal with this situation!\n");
+		exit(233);
+	}
+	tcg_gen_extu_i32_i64(cpu_exclusive_addr, addr);
+	tcg_gen_movi_i32(cpu_exclusive_info, rt);
+	gen_exception_internal_insn(s, 4, EXCP_LDREX);
+}
+#else
 static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i32 addr, int size)
 {
@@ -7490,7 +7504,6 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 #ifdef PF_LLSC
     tcg_gen_ldex_count(addr);
 #endif
-
 
     if (size == 3) {
 		fprintf(stderr, "! I don't wanna deal with this situation!\n");
@@ -7530,6 +7543,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     store_reg(s, rt, tmp);
     tcg_gen_extu_i32_i64(cpu_exclusive_addr, addr);
 }
+#endif
 
 static void gen_clrex(DisasContext *s)
 {
