@@ -1020,3 +1020,12 @@ void HELPER(print_aa32_addr)(uint32_t addr)
 {
     fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
 }
+
+extern int target_mprotect(abi_ulong, abi_ulong, int);
+void HELPER(pf_llsc_add)(uint32_t addr)
+{
+	target_ulong page_addr = addr & 0xfffff000;
+    fprintf(stderr, "[pf_llsc_add]\taddr = %x\n", page_addr);
+
+	target_mprotect(page_addr, 0x1000, PROT_READ);
+}

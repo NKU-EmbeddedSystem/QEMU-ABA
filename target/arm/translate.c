@@ -37,8 +37,8 @@
 #include "trace-tcg.h"
 #include "exec/log.h"
 
-#define HASH_LLSC
-//#define PF_LLSC
+//#define HASH_LLSC
+#define PF_LLSC
 //#define PICO_ST_LLSC
 #define QEMU_LLSC			/* gen EXCEPTION on STREX */
 //#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
@@ -7501,7 +7501,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     tcg_temp_free(hash_addr);
 #endif
 #ifdef PF_LLSC
-    tcg_gen_ldex_count(addr);
+	tcg_gen_pf_llsc_add(addr);
 #endif
 
     if (size == 3) {

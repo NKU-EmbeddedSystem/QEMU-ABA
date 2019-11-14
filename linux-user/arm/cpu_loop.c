@@ -71,8 +71,10 @@
         put_user_u16(__x, (gaddr));                     \
     })
 
-#define HASH_LLSC
+//#define HASH_LLSC
 //#define LLSC_LOG
+#define PICO_ST_LLSC
+#define PF_LLSC
 /* Commpage handling -- there is no commpage for AArch64 */
 
 /*
@@ -269,6 +271,10 @@ static int do_strex(CPUARMState *env)
      */
     assert(extract64(env->exclusive_addr, 32, 32) == 0);
     addr = env->exclusive_addr;
+#ifdef PF_LLSC
+	target_ulong page_addr = addr & 0xfffff000;
+	target_mprotect(page_addr, 0x1000, PROT_READ|PROT_WRITE);
+#endif
 #ifdef HASH_LLSC
 	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
 	segv = get_user_u32(hash_entry, hash_addr);
