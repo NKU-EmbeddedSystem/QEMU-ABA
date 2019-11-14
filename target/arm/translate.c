@@ -37,11 +37,11 @@
 #include "trace-tcg.h"
 #include "exec/log.h"
 
-//#define HASH_LLSC
+#define HASH_LLSC
 //#define PF_LLSC
 //#define PICO_ST_LLSC
-#define QEMU_LLSC
-#define ATOMIC_LDREX
+#define QEMU_LLSC			/* gen EXCEPTION on STREX */
+//#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -1140,18 +1140,15 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
     TCGv_i32 hash_addr = tcg_temp_new_i32();
-    //TCGv_i32 fake_tid = tcg_const_i32(0x123);
 
     //tcg_gen_ldex_count(addr);
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
     //tcg_gen_ldex_count(hash_addr);
-    //tcg_gen_qemu_st_i32(fake_tid, hash_addr, index, opc);
-    tcg_gen_qemu_st_i32(exclusive_tid, hash_addr, index, opc);
+    tcg_gen_qemu_st_i32(cpu_exclusive_tid, hash_addr, index, opc);
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
-    tcg_temp_free(fake_tid);
 #endif /* HASH_LLSC */
     tcg_gen_qemu_st_i32(val, addr, index, opc);
     tcg_temp_free(addr);
@@ -7490,7 +7487,6 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
     TCGv_i32 hash_addr = tcg_temp_new_i32();
-    TCGv_i32 fake_tid = tcg_const_i32(0x123);
 #endif
 
     s->is_ldex = true;
@@ -7499,11 +7495,10 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     //hash method
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
-    gen_aa32_st32(s, fake_tid, hash_addr, get_mem_index(s));
+    gen_aa32_st32(s, cpu_exclusive_tid, hash_addr, get_mem_index(s));
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
-    tcg_temp_free(fake_tid);
 #endif
 #ifdef PF_LLSC
     tcg_gen_ldex_count(addr);

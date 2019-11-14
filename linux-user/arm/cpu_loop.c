@@ -71,6 +71,8 @@
         put_user_u16(__x, (gaddr));                     \
     })
 
+#define HASH_LLSC
+//#define LLSC_LOG
 /* Commpage handling -- there is no commpage for AArch64 */
 
 /*
@@ -225,7 +227,7 @@ static int do_ldrex(CPUARMState *env)
 
 #ifdef HASH_LLSC
 	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
-    segv = put_user_u32(val, hash_addr);
+    segv = put_user_u32(env->exclusive_tid, hash_addr);
 	assert(segv == 0);
 #endif
 	
@@ -234,7 +236,9 @@ static int do_ldrex(CPUARMState *env)
 	//fprintf(stderr, "ldrex reg = %d, reg15 = %d, val = %ld!, addr = %x\n",
 	//		(env->exclusive_info) & 0xf , env->regs[15], val, addr);
 
+#ifdef LLSC_LOG
 	fprintf(stderr, "thread %d ldrex done! val %lx, addr %x\n", env->exclusive_tid, env->exclusive_val, addr);
+#endif
     end_exclusive();
     return segv;
 }
@@ -247,10 +251,16 @@ static int do_strex(CPUARMState *env)
     int rc = 1;
     int segv = 0;
     uint32_t addr;
+#ifdef HASH_LLSC
+	uint32_t hash_addr;
+	uint32_t hash_entry;
+#endif
     //fprintf(stderr, "[do_strex]\tdo_strex\n");
     start_exclusive();
     if (env->exclusive_addr != env->exclusive_test) {
-		fprintf(stderr, "thread %d strex fail!\n", env->exclusive_tid);
+#ifdef LLSC_LOG
+		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
+#endif
         goto fail;
     }
     /* We know we're always AArch32 so the address is in uint32_t range
@@ -259,6 +269,20 @@ static int do_strex(CPUARMState *env)
      */
     assert(extract64(env->exclusive_addr, 32, 32) == 0);
     addr = env->exclusive_addr;
+#ifdef HASH_LLSC
+	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
+	segv = get_user_u32(hash_entry, hash_addr);
+	assert(segv == 0);
+	if (hash_entry != env->exclusive_tid) {
+
+#ifdef LLSC_LOG
+		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, hash_entry %x, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
+#endif
+        goto fail;
+    }
+
+#endif
+	
     size = env->exclusive_info & 0xf;
     switch (size) {
     case 0:
@@ -288,12 +312,16 @@ static int do_strex(CPUARMState *env)
         val = deposit64(val, 32, 32, valhi);
     }
     if (val != env->exclusive_val) {
+#ifdef LLSC_LOG
 	fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
+#endif
         goto fail;
     }
 
     val = env->regs[(env->exclusive_info >> 8) & 0xf];
+#ifdef LLSC_LOG
 	fprintf(stderr, "thread %d strex suc! newval %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
+#endif
     switch (size) {
     case 0:
         segv = put_user_u8(val, addr);
