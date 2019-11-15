@@ -5641,6 +5641,7 @@ typedef struct {
     sigset_t sigmask;
 } new_thread_info;
 
+extern void* x_monitor_register_thread(int tid);
 static void *clone_func(void *arg)
 {
     new_thread_info *info = arg;
@@ -5661,6 +5662,7 @@ static void *clone_func(void *arg)
     if (info->parent_tidptr)
         put_user_u32(info->tid, info->parent_tidptr);
 	env->exclusive_tid = info->tid;
+	env->exclusive_node = (uint64_t)x_monitor_register_thread(info->tid);
     qemu_guest_random_seed_thread_part2(cpu->random_seed);
     /* Enable signals.  */
     sigprocmask(SIG_SETMASK, &info->sigmask, NULL);
@@ -7221,6 +7223,7 @@ static int host_to_target_cpu_mask(const unsigned long *host_mask,
  * of syscall results, can be performed.
  * All errnos that do_syscall() returns must be -TARGET_<errcode>.
  */
+extern int x_monitor_unregister_thread(int tid);
 static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                             abi_long arg2, abi_long arg3, abi_long arg4,
                             abi_long arg5, abi_long arg6, abi_long arg7,
@@ -7271,6 +7274,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             object_unref(OBJECT(cpu));
             g_free(ts);
             rcu_unregister_thread();
+			x_monitor_unregister_thread(((CPUARMState*)cpu)->exclusive_tid);
+
             pthread_exit(NULL);
         }
 

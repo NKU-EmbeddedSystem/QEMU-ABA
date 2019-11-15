@@ -26,7 +26,7 @@
 #include "signal-common.h"
 
 #define PF_LLSC
-#define PF_LOG
+//#define PF_LOG
 static struct target_sigaction sigact_table[TARGET_NSIG];
 
 static void host_signal_handler(int host_signum, siginfo_t *info,
@@ -651,7 +651,8 @@ static inline void rewind_if_in_safe_syscall(void *puc)
 #endif
 
 #ifdef PF_LLSC
-extern void cpu_exec_step_atomic(CPUState *cpu);
+extern void cpu_exec_step_atomic_pf(CPUState *cpu);
+extern int x_monitor_check_and_clean(int tid, uint32_t addr);
 
 static int pf_llsc_segfault_handler(int host_signum, siginfo_t *pinfo, void *puc)
 {
@@ -663,17 +664,22 @@ static int pf_llsc_segfault_handler(int host_signum, siginfo_t *pinfo, void *puc
 	target_ulong page_addr = guest_addr & 0xfffff000;
     int is_write = ((uc->uc_mcontext.gregs[REG_ERR] & 0x2) != 0);
 	assert(is_write == 1);
-#ifdef PF_LOG
-	fprintf(stderr, "[pf_llsc_segfault_handler]\tguest addr is %p, host_addr is %p, perm %d\n",(void *)guest_addr, (void*)host_addr, is_write);
-#endif
     CPUArchState *env = thread_cpu->env_ptr;
     CPUState *cpu = env_cpu(env);
-	cpu_exec_end(cpu);
-	start_exclusive();
+#ifdef PF_LOG
+	fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, perm %d\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr, is_write);
+#endif
+	//cpu_exec_end(cpu);
+	//start_exclusive();
 	//fprintf(stderr, "[pf_llsc_segfault_handler]\ti am in.\n");
 	target_mprotect(page_addr, 0x1000, PROT_READ | PROT_WRITE);
-	end_exclusive();
-	cpu_exec_start(cpu);
+    //cpu_exec_step_atomic_pf(cpu);
+	int x_count = x_monitor_check_and_clean(((CPUARMState*)cpu)->exclusive_tid, guest_addr);
+	if (x_count > 0) {
+		target_mprotect(page_addr, 0x1000, PROT_READ);
+	}
+	//end_exclusive();
+	//cpu_exec_start(cpu);
     return 0;
 }
 #endif

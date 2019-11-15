@@ -231,6 +231,57 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
 }
 #endif
 
+void cpu_exec_step_atomic_pf(CPUState *cpu)
+{
+    CPUClass *cc = CPU_GET_CLASS(cpu);
+    TranslationBlock *tb;
+    target_ulong cs_base, pc;
+    uint32_t flags;
+    uint32_t cflags = 1;
+    uint32_t cf_mask = cflags & CF_HASH_MASK;
+    /* volatile because we modify it between setjmp and longjmp */
+    volatile bool in_exclusive_region = false;
+
+    if (sigsetjmp(cpu->jmp_env, 0) == 0) {
+        tb = tb_lookup__cpu_state(cpu, &pc, &cs_base, &flags, cf_mask);
+        if (tb == NULL) {
+            mmap_lock();
+            tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
+            mmap_unlock();
+        }
+
+
+        /* Since we got here, we know that parallel_cpus must be true.  */
+        parallel_cpus = false;
+        in_exclusive_region = true;
+        cc->cpu_exec_enter(cpu);
+        /* execute the generated code */
+        trace_exec_tb(tb, pc);
+		fprintf(stderr, "pf_llsc exec pc %x\n", pc);
+        cpu_tb_exec(cpu, tb);
+        cc->cpu_exec_exit(cpu);
+    } else {
+        /*
+         * The mmap_lock is dropped by tb_gen_code if it runs out of
+         * memory.
+         */
+#ifndef CONFIG_SOFTMMU
+        tcg_debug_assert(!have_mmap_lock());
+#endif
+        if (qemu_mutex_iothread_locked()) {
+            qemu_mutex_unlock_iothread();
+        }
+        assert_no_pages_locked();
+    }
+
+    if (in_exclusive_region) {
+        /* We might longjump out of either the codegen or the
+         * execution, so must make sure we only end the exclusive
+         * region if we started it.
+         */
+        parallel_cpus = true;
+    }
+}
 void cpu_exec_step_atomic(CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);

@@ -73,7 +73,7 @@
 
 //#define HASH_LLSC
 //#define LLSC_LOG
-#define PICO_ST_LLSC
+//#define PICO_ST_LLSC
 #define PF_LLSC
 /* Commpage handling -- there is no commpage for AArch64 */
 
@@ -245,6 +245,10 @@ static int do_ldrex(CPUARMState *env)
     return segv;
 }
 
+#ifdef PF_LLSC
+extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
+extern int x_monitor_check_and_clean(int tid, uint32_t addr);
+#endif
 /* Store exclusive handling for AArch32 */
 static int do_strex(CPUARMState *env)
 {
@@ -259,9 +263,10 @@ static int do_strex(CPUARMState *env)
 #endif
     //fprintf(stderr, "[do_strex]\tdo_strex\n");
     start_exclusive();
+
     if (env->exclusive_addr != env->exclusive_test) {
 #ifdef LLSC_LOG
-		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
+		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx\n", env->exclusive_tid, val, env->exclusive_val);
 #endif
         goto fail;
     }
@@ -274,6 +279,12 @@ static int do_strex(CPUARMState *env)
 #ifdef PF_LLSC
 	target_ulong page_addr = addr & 0xfffff000;
 	target_mprotect(page_addr, 0x1000, PROT_READ|PROT_WRITE);
+	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
+#ifdef LLSC_LOG
+		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, exclusive mark lost.\n", env->exclusive_tid, val, env->exclusive_val);
+#endif
+		goto fail;
+	}
 #endif
 #ifdef HASH_LLSC
 	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
@@ -328,6 +339,9 @@ static int do_strex(CPUARMState *env)
 #ifdef LLSC_LOG
 	fprintf(stderr, "thread %d strex suc! newval %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
 #endif
+#ifdef PF_LLSC
+	x_monitor_check_and_clean(env->exclusive_tid, addr);
+#endif
     switch (size) {
     case 0:
         segv = put_user_u8(val, addr);
@@ -341,6 +355,7 @@ static int do_strex(CPUARMState *env)
         break;
     }
     if (segv) {
+		assert(segv);
         env->exception.vaddress = addr;
         goto done;
     }

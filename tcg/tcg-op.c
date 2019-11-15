@@ -3023,9 +3023,9 @@ typedef void (*gen_atomic_op_i64)(TCGv_i64, TCGv_env, TCGv, TCGv_i64);
 # define WITH_ATOMIC64(X)
 #endif
 
-void tcg_gen_pf_llsc_add(TCGv addr)
+void tcg_gen_pf_llsc_add(TCGv addr, TCGv_i64 node_addr)
 {
-    gen_helper_pf_llsc_add(addr);
+    gen_helper_pf_llsc_add(addr, node_addr);
 }
 
 void tcg_gen_ldex_count(TCGv addr)

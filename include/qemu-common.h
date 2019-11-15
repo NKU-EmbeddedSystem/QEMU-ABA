@@ -61,6 +61,7 @@ int qemu_openpty_raw(int *aslave, char *pty_name);
 
 void cpu_exec_init_all(void);
 void cpu_exec_step_atomic(CPUState *cpu);
+void cpu_exec_step_atomic_pf(CPUState *cpu);
 
 /**
  * set_preferred_target_page_bits:

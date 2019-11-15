@@ -619,6 +619,7 @@ typedef struct CPUARMState {
     uint64_t exclusive_high;
     uint64_t exclusive_test;
     uint32_t exclusive_info;
+	uint64_t exclusive_node;
 	int exclusive_tid;
 
     /* iwMMXt coprocessor state.  */

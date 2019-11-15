@@ -48,6 +48,141 @@
 /* Globals */
 int ldex_count;
 int stex_count;
+#define X_MONITOR
+//#define X_LOG
+#ifdef X_MONITOR
+/* Exclusive Monitor */
+#define PAGE_MASK 0xfffff000
+pthread_mutex_t x_mon_mutex = PTHREAD_MUTEX_INITIALIZER;
+typedef struct x_node {
+	int tid;
+	uint32_t exclusive_addr;
+	uint32_t page_addr;	
+	struct x_node *next;
+} x_node;
+x_node	exclusive_monitor;
+x_node* exclusive_monitor_head = &exclusive_monitor;
+void* x_monitor_register_thread(int tid);
+void x_monitor_show(const char *info);
+int x_monitor_unregister_thread(int tid);
+int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
+int x_monitor_check_and_clean(int tid, uint32_t addr);
+int x_monitor_check_exclusive(void* p_node, uint32_t addr);
+
+
+void x_monitor_show(const char *info)
+{
+	char buf[0x1000];
+	sprintf(buf, "[x_monitor_show] in  %s\n", info);
+	x_node *p = exclusive_monitor_head->next;
+	while (p) {
+		sprintf(buf, "%sthread %d x_addr %x x_page %x\n", buf, p->tid, p->exclusive_addr, p->page_addr);
+		p = p->next;
+	}
+	fprintf(stderr, "%s", buf);
+}
+		
+
+void* x_monitor_register_thread(int tid)
+{
+#ifdef X_LOG
+	fprintf(stderr, "[register_thread]\tregistering thread %d\n", tid);
+#endif
+
+	pthread_mutex_lock(&x_mon_mutex);
+	x_node *p = malloc(sizeof(x_node));
+	p->tid = tid;
+	p->exclusive_addr = 0;
+	p->page_addr = 0;
+	p->next = exclusive_monitor_head->next;
+	exclusive_monitor_head->next = p;
+#ifdef X_LOG
+	x_monitor_show("register thread");
+#endif
+	pthread_mutex_unlock(&x_mon_mutex);
+	return (void*)p;
+}
+int x_monitor_unregister_thread(int tid)
+{
+	int ret = 1;
+	pthread_mutex_lock(&x_mon_mutex);
+#ifdef X_LOG
+	x_monitor_show("unregister thread");
+#endif
+	x_node *p = exclusive_monitor_head->next, *pre = exclusive_monitor_head;
+	while (p) {
+		if (p->tid == tid) {
+			ret = 0;
+			pre->next = p->next;
+#ifdef X_LOG
+			fprintf(stderr, "unregister thread %d\n", p->tid);
+#endif
+			free(p);
+			break;
+		}
+		pre = p;
+		p = p->next;
+	}
+#ifdef X_LOG
+	x_monitor_show("unregister thread");
+#endif
+	pthread_mutex_unlock(&x_mon_mutex);
+	return ret;
+}
+int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr)
+{
+	pthread_mutex_lock(&x_mon_mutex);
+#ifdef X_LOG
+	fprintf(stderr, "[x_monitor_set_exclusive_addr]\tp_node %p, addr %x\n", p_node, addr);
+#endif
+	x_node *p = (x_node*)p_node;
+	p->exclusive_addr = addr;
+	p->page_addr = addr & PAGE_MASK;
+#ifdef X_LOG
+	x_monitor_show("set x addr");
+#endif
+	pthread_mutex_unlock(&x_mon_mutex);
+	return 0;
+}
+int x_monitor_check_exclusive(void* p_node, uint32_t addr)
+{
+	x_node *p = (x_node*)p_node;
+	return (p->exclusive_addr == addr);
+}
+
+int x_monitor_check_and_clean(int tid, uint32_t addr)
+{
+	pthread_mutex_lock(&x_mon_mutex);
+	x_node *p = exclusive_monitor_head->next;
+	uint32_t page_addr = addr & PAGE_MASK;
+	int page_x_count = 0;
+	while (p) {
+		if (p->page_addr == page_addr) {
+			//!!!!!!!!!!!!!
+			if (p->exclusive_addr == addr||1) {
+				p->exclusive_addr = 0;
+#ifdef X_LOG
+				fprintf(stderr, "cleaned thread %d x_addr %x\n", p->tid, p->exclusive_addr);
+#endif
+			}
+			else {
+				page_x_count++;
+			}
+		}
+		p = p->next;
+	}
+#ifdef X_LOG
+	x_monitor_show("check and clean");
+#endif
+	pthread_mutex_unlock(&x_mon_mutex);
+	return page_x_count;
+}
+
+
+
+
+
+#endif
 
 char *exec_path;
 
@@ -846,6 +981,7 @@ int main(int argc, char **argv, char **envp)
 						0x10000000, PROT_READ|PROT_WRITE,
 						MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
 	assert(ret_mmp == 0xa0000000);
+	((CPUARMState*)env)->exclusive_node = (uint64_t)x_monitor_register_thread(tid);
     cpu_loop(env);
     /* never exits */
     return 0;

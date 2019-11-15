@@ -75,6 +75,9 @@ static TCGv_i32 cpu_exclusive_tid;
 static TCGv_i64 cpu_exclusive_test;
 static TCGv_i32 cpu_exclusive_info;
 #endif
+#ifdef PF_LLSC
+static TCGv_i64 cpu_exclusive_node;
+#endif
 
 #include "exec/gen-icount.h"
 
@@ -114,6 +117,10 @@ void arm_translate_init(void)
         offsetof(CPUARMState, exclusive_test), "exclusive_test");
     cpu_exclusive_info = tcg_global_mem_new_i32(cpu_env,
         offsetof(CPUARMState, exclusive_info), "exclusive_info");
+#endif
+#ifdef PF_LLSC
+    cpu_exclusive_node = tcg_global_mem_new_i64(cpu_env,
+        offsetof(CPUARMState, exclusive_node), "exclusive_node");
 #endif
 
     a64_translate_init();
@@ -7501,7 +7508,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     tcg_temp_free(hash_addr);
 #endif
 #ifdef PF_LLSC
-	tcg_gen_pf_llsc_add(addr);
+	tcg_gen_pf_llsc_add(addr, cpu_exclusive_node);
 #endif
 
     if (size == 3) {

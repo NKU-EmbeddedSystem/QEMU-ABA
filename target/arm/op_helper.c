@@ -1021,11 +1021,12 @@ void HELPER(print_aa32_addr)(uint32_t addr)
     fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
 }
 
+extern int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
 extern int target_mprotect(abi_ulong, abi_ulong, int);
-void HELPER(pf_llsc_add)(uint32_t addr)
+void HELPER(pf_llsc_add)(uint32_t addr, uint64_t node_addr)
 {
 	target_ulong page_addr = addr & 0xfffff000;
-    fprintf(stderr, "[pf_llsc_add]\taddr = %x\n", page_addr);
-
+    //fprintf(stderr, "[pf_llsc_add]\taddr = %x, node_addr = %lx\n", page_addr, node_addr);
+	x_monitor_set_exclusive_addr((void*)node_addr, addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ);
 }
