@@ -26,6 +26,8 @@
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 
+#include "linux-user/qemu.h"
+
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
 
@@ -1022,11 +1024,28 @@ void HELPER(print_aa32_addr)(uint32_t addr)
 }
 
 extern int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
-extern int target_mprotect(abi_ulong, abi_ulong, int);
+//extern int target_mprotect(abi_ulong, abi_ulong, int);
+extern int x_monitor_check_and_clean(int tid, uint32_t addr);			/* return x still in the page */
 void HELPER(pf_llsc_add)(uint32_t addr, uint64_t node_addr)
 {
 	target_ulong page_addr = addr & 0xfffff000;
     //fprintf(stderr, "[pf_llsc_add]\taddr = %x, node_addr = %lx\n", page_addr, node_addr);
 	x_monitor_set_exclusive_addr((void*)node_addr, addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ);
+}
+void HELPER(pico_st)(uint32_t addr, uint32_t tid)
+{
+	uint32_t hash_addr;
+	uint32_t hash_entry;
+	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
+	int segv = get_user_u32(hash_entry, hash_addr);
+	assert(segv == 0);
+	//printf("I am in!\n");
+	if (hash_entry != 0) {
+		int x_remaining = x_monitor_check_and_clean(tid, addr);
+		if (x_remaining > 0) {
+			segv = put_user_u32(0, hash_addr);
+			assert(segv == 0);
+		}
+	}
 }

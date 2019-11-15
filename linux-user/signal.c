@@ -25,7 +25,7 @@
 #include "trace.h"
 #include "signal-common.h"
 
-#define PF_LLSC
+//#define PF_LLSC
 //#define PF_LOG
 static struct target_sigaction sigact_table[TARGET_NSIG];
 

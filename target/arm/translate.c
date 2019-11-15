@@ -38,10 +38,10 @@
 #include "exec/log.h"
 
 //#define HASH_LLSC
-#define PF_LLSC
-//#define PICO_ST_LLSC
+//#define PF_LLSC
+#define PICO_ST_LLSC
 #define QEMU_LLSC			/* gen EXCEPTION on STREX */
-//#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
+#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -1157,6 +1157,9 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
 #endif /* HASH_LLSC */
+#ifdef PICO_ST_LLSC
+	tcg_gen_pico_st(addr, cpu_exclusive_tid);
+#endif
     tcg_gen_qemu_st_i32(val, addr, index, opc);
     tcg_temp_free(addr);
 }

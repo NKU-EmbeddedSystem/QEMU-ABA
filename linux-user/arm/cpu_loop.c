@@ -73,8 +73,8 @@
 
 //#define HASH_LLSC
 //#define LLSC_LOG
-//#define PICO_ST_LLSC
-#define PF_LLSC
+#define PICO_ST
+//#define PF_LLSC
 /* Commpage handling -- there is no commpage for AArch64 */
 
 /*
@@ -210,12 +210,16 @@ do_kernel_trap(CPUARMState *env)
 }
 
 /* Load exclusive handling for AArch32 */
+extern int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
 static int do_ldrex(CPUARMState *env)
 {
     uint64_t val;
     int segv = 0;
     uint32_t addr;
 #ifdef HASH_LLSC
+	uint32_t hash_addr;
+#endif
+#ifdef PICO_ST
 	uint32_t hash_addr;
 #endif
     //fprintf(stderr, "do_ldrex\n");
@@ -231,6 +235,12 @@ static int do_ldrex(CPUARMState *env)
 	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
     segv = put_user_u32(env->exclusive_tid, hash_addr);
 	assert(segv == 0);
+#endif
+#ifdef PICO_ST
+	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
+    segv = put_user_u32(1, hash_addr);
+	assert(segv == 0);
+	x_monitor_set_exclusive_addr((void*)env->exclusive_node, addr);
 #endif
 	
     env->regs[15] += 4;
@@ -249,6 +259,10 @@ static int do_ldrex(CPUARMState *env)
 extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
 extern int x_monitor_check_and_clean(int tid, uint32_t addr);
 #endif
+#ifdef PICO_ST
+extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
+extern int x_monitor_check_and_clean(int tid, uint32_t addr);
+#endif
 /* Store exclusive handling for AArch32 */
 static int do_strex(CPUARMState *env)
 {
@@ -260,6 +274,9 @@ static int do_strex(CPUARMState *env)
 #ifdef HASH_LLSC
 	uint32_t hash_addr;
 	uint32_t hash_entry;
+#endif
+#ifdef PICO_ST
+	uint32_t hash_addr;
 #endif
     //fprintf(stderr, "[do_strex]\tdo_strex\n");
     start_exclusive();
@@ -294,6 +311,16 @@ static int do_strex(CPUARMState *env)
 
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, hash_entry %x, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
+#endif
+        goto fail;
+    }
+
+#endif
+#ifdef PICO_ST
+	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
+
+#ifdef LLSC_LOG
+		fprintf(stderr, "thread %d strex fail! x_monitor is reset val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
 #endif
         goto fail;
     }
@@ -341,6 +368,14 @@ static int do_strex(CPUARMState *env)
 #endif
 #ifdef PF_LLSC
 	x_monitor_check_and_clean(env->exclusive_tid, addr);
+#endif
+#ifdef PICO_ST
+	int x_remaining = x_monitor_check_and_clean(env->exclusive_tid, addr);
+	if (x_remaining > 0) {
+		hash_addr = (addr & 0x0fffffff) | 0xa0000000;
+		segv = put_user_u32(0, hash_addr);
+		assert(segv == 0);
+	}
 #endif
     switch (size) {
     case 0:

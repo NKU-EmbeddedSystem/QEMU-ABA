@@ -66,8 +66,8 @@ void* x_monitor_register_thread(int tid);
 void x_monitor_show(const char *info);
 int x_monitor_unregister_thread(int tid);
 int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
-int x_monitor_check_and_clean(int tid, uint32_t addr);
-int x_monitor_check_exclusive(void* p_node, uint32_t addr);
+int x_monitor_check_and_clean(int tid, uint32_t addr);			/* return x still in the page */
+int x_monitor_check_exclusive(void* p_node, uint32_t addr);		/* return 1 if addr == x_addr */
 
 
 void x_monitor_show(const char *info)
@@ -159,7 +159,7 @@ int x_monitor_check_and_clean(int tid, uint32_t addr)
 	while (p) {
 		if (p->page_addr == page_addr) {
 			//!!!!!!!!!!!!!
-			if (p->exclusive_addr == addr||1) {
+			if (p->exclusive_addr == addr) {
 				p->exclusive_addr = 0;
 #ifdef X_LOG
 				fprintf(stderr, "cleaned thread %d x_addr %x\n", p->tid, p->exclusive_addr);
