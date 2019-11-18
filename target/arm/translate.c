@@ -7569,13 +7569,6 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     TCGLabel *fail_label;
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
 
-	//tcg_gen_stex_count(addr);
-#ifdef HASH_LLSC
-	tcg_gen_stex_count(addr);
-#endif
-#ifdef PF_LLSC
-	tcg_gen_stex_count(addr);
-#endif
 
 
     /* if (env->exclusive_addr == addr && env->exclusive_val == [addr]) {
