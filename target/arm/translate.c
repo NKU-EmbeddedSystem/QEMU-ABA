@@ -1136,6 +1136,7 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
 
     addr = gen_aa32_addr(s, a32, opc);
 	/* A Hash approach to avoid ABA problem. */
+	/*
 #ifdef HASH_LLSC
     TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
@@ -1149,7 +1150,8 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
-#endif /* HASH_LLSC */
+#endif 
+	*/
     tcg_gen_qemu_st_i32(val, addr, index, opc);
     tcg_temp_free(addr);
 }
@@ -7482,7 +7484,6 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 {
     TCGv_i32 tmp = tcg_temp_new_i32();
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
-	//tcg_gen_stex_count(addr);
 #ifdef HASH_LLSC
     TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
@@ -7491,17 +7492,12 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 
     s->is_ldex = true;
 #ifdef HASH_LLSC
-    //tcg_gen_ldex_count(addr);
-    //hash method
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
     gen_aa32_st32(s, cpu_exclusive_tid, hash_addr, get_mem_index(s));
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
-#endif
-#ifdef PF_LLSC
-    tcg_gen_ldex_count(addr);
 #endif
 
     if (size == 3) {

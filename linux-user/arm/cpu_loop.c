@@ -222,13 +222,13 @@ static int do_ldrex(CPUARMState *env)
     addr = env->exclusive_addr;
 
     segv = get_user_u32(val, addr);
-	assert(segv == 0);
+	//assert(segv == 0);
 	env->exclusive_val = val;
 
 #ifdef HASH_LLSC
 	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
     segv = put_user_u32(env->exclusive_tid, hash_addr);
-	assert(segv == 0);
+	//assert(segv == 0);
 #endif
 	
     env->regs[15] += 4;
