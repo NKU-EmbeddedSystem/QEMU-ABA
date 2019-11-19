@@ -38,10 +38,11 @@
 #include "exec/log.h"
 
 #define HASH_LLSC
+#define HASH_V2
 //#define PF_LLSC
 //#define PICO_ST_LLSC
 #define QEMU_LLSC			/* gen EXCEPTION on STREX */
-//#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
+#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -1136,9 +1137,8 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
 
     addr = gen_aa32_addr(s, a32, opc);
 	/* A Hash approach to avoid ABA problem. */
-	/*
 #ifdef HASH_LLSC
-    TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
+    TCGv_i32 mask1 = tcg_const_i32(0x0ffffff0);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
     TCGv_i32 hash_addr = tcg_temp_new_i32();
 
@@ -1151,7 +1151,6 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
 #endif 
-	*/
     tcg_gen_qemu_st_i32(val, addr, index, opc);
     tcg_temp_free(addr);
 }
@@ -7485,7 +7484,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     TCGv_i32 tmp = tcg_temp_new_i32();
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
 #ifdef HASH_LLSC
-    TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
+    TCGv_i32 mask1 = tcg_const_i32(0x0ffffff0);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
     TCGv_i32 hash_addr = tcg_temp_new_i32();
 #endif
@@ -7545,6 +7544,17 @@ static void gen_clrex(DisasContext *s)
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
 
+#ifdef HASH_V2
+static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
+                                TCGv_i32 addr, int size)
+{
+    tcg_gen_extu_i32_i64(cpu_exclusive_test, addr);
+    tcg_gen_movi_i32(cpu_exclusive_info,
+                     size | (rd << 4) | (rt << 8) | (rt2 << 12));
+    tcg_gen_hash_v2_store_exclusive(cpu_env);
+}
+
+#else
 #ifdef QEMU_LLSC
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
@@ -7630,6 +7640,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     gen_set_label(done_label);
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
+#endif
 #endif
 
 /* gen_srs:

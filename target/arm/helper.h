@@ -693,6 +693,7 @@ DEF_HELPER_FLAGS_2(frint64_d, TCG_CALL_NO_RWG, f64, f64, ptr)
 DEF_HELPER_1(offload_load_exclusive_count, void, i32)
 DEF_HELPER_1(offload_store_exclusive_count, void, i32)
 DEF_HELPER_1(print_aa32_addr, void, i32)
+DEF_HELPER_1(hash_v2_store_exclusive, void, env)
 
 #ifdef TARGET_AARCH64
 #include "helper-a64.h"

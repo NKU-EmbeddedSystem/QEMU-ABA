@@ -72,7 +72,7 @@
     })
 
 #define HASH_LLSC
-//#define LLSC_LOG
+#define LLSC_LOG
 /* Commpage handling -- there is no commpage for AArch64 */
 
 /*
@@ -226,7 +226,7 @@ static int do_ldrex(CPUARMState *env)
 	env->exclusive_val = val;
 
 #ifdef HASH_LLSC
-	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
+	hash_addr = (addr & 0x0ffffff0) | 0xa0000000;
     segv = put_user_u32(env->exclusive_tid, hash_addr);
 	//assert(segv == 0);
 #endif
@@ -256,7 +256,7 @@ static int do_strex(CPUARMState *env)
 	uint32_t hash_entry;
 #endif
     //fprintf(stderr, "[do_strex]\tdo_strex\n");
-    start_exclusive();
+    //start_exclusive();
     if (env->exclusive_addr != env->exclusive_test) {
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
@@ -352,7 +352,7 @@ fail:
     env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
 	
 done:
-    end_exclusive();
+    //end_exclusive();
     return segv;
 }
 
