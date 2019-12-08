@@ -9258,6 +9258,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         /* new thread calls */
     case TARGET_NR_exit_group:
         preexit_cleanup(cpu_env, arg1);
+		x_monitor_unregister_thread(((CPUARMState*)cpu)->exclusive_tid);
         return get_errno(exit_group(arg1));
 #endif
     case TARGET_NR_setdomainname:

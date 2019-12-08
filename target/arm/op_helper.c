@@ -1003,17 +1003,24 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
 #endif
 }
 
+extern int ldex_count;
+extern long long llsc_single;
+extern long long llsc_multi;
+extern int is_multi;
 void HELPER(offload_load_exclusive_count)(uint32_t addr)
 {
-    //extern int ldex_count;
-    //ldex_count++;
+	if (!is_multi)
+		__sync_fetch_and_add(&llsc_single, 1);
+	else
+		__sync_fetch_and_add(&llsc_multi, 1);
+
     //fprintf(stderr, "helper_offload_load_exclusive\taddr %p, value %p\n", addr, *(int*)(g2h(addr)));
 }
 
 void HELPER(offload_store_exclusive_count)(uint32_t addr)
 {
     //extern int stex_count;
-    //stex_count++;
+	//__sync_fetch_and_add(&stex_count, 1);
 }
 
 void HELPER(print_aa32_addr)(uint32_t addr)

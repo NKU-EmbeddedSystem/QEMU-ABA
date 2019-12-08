@@ -44,10 +44,17 @@
 #include "target_elf.h"
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
+#include <sys/timeb.h>
 
 /* Globals */
 int ldex_count;
 int stex_count;
+long long llsc_single;
+long long llsc_multi;
+struct timeb t_start, t_multi_start, t_multi_end, t_end;
+long long t_single, t_multi;
+int is_multi;
+int thread_count;
 #define X_MONITOR
 //#define X_LOG
 #ifdef X_MONITOR
@@ -89,7 +96,23 @@ void* x_monitor_register_thread(int tid)
 	fprintf(stderr, "[register_thread]\tregistering thread %d\n", tid);
 #endif
 
+
 	pthread_mutex_lock(&x_mon_mutex);
+	thread_count++;
+	if (thread_count == 1) {
+		ftime(&t_start);
+		fprintf(stderr, "[x_mon]\tprogram start!\n");
+	}
+	if (thread_count>1)
+	if (!is_multi) {
+		is_multi = 1;
+		ftime(&t_multi_start);
+		int secDiff = t_multi_start.time - t_start.time;
+		secDiff *= 1000;
+		secDiff += (t_multi_start.millitm - t_start.millitm);
+		fprintf(stderr, "[x_mon]\tmulti thread begin! used: %dms\n", secDiff);
+		t_single += secDiff;
+	}
 	x_node *p = malloc(sizeof(x_node));
 	p->tid = tid;
 	p->exclusive_addr = 0;
@@ -109,6 +132,31 @@ int x_monitor_unregister_thread(int tid)
 #ifdef X_LOG
 	x_monitor_show("unregister thread");
 #endif
+	thread_count--;
+	if (thread_count == 1) {
+		is_multi = 0;
+		ftime(&t_multi_end);
+		int secDiff = t_multi_end.time - t_multi_start.time;
+		secDiff *= 1000;
+		secDiff += (t_multi_end.millitm - t_multi_start.millitm);
+		fprintf(stderr, "[x_mon]\tmulti thread end! used: %dms\n", secDiff);
+		t_multi += secDiff;
+	}
+	if (thread_count == 0) {
+		is_multi = 0;
+		ftime(&t_end);
+		int secDiff = t_end.time - t_multi_end.time;
+		secDiff *= 1000;
+		secDiff += (t_end.millitm - t_multi_end.millitm);
+		t_single += secDiff;
+		fprintf(stderr, "[x_mon]\tall thread end! used: %dms\n", secDiff);
+		double total = (double)t_single+(double)t_multi;
+		fprintf(stderr, "[x_mon]\tt_single=%lldms, t_multi=%lldms, single rate=%lf\n", 
+				t_single, t_multi, (double)t_single/total);
+		fprintf(stderr, "[x_mon]\tllsc_single=%lld, llsc_multi=%lld\n", llsc_single, llsc_multi);
+	}
+
+
 	x_node *p = exclusive_monitor_head->next, *pre = exclusive_monitor_head;
 	while (p) {
 		if (p->tid == tid) {
@@ -748,6 +796,7 @@ int main(int argc, char **argv, char **envp)
     int ret;
     int execfd;
 
+	ftime(&t_start);
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();

@@ -7490,6 +7490,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     TCGv_i32 tmp = tcg_temp_new_i32();
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
 	//tcg_gen_stex_count(addr);
+	tcg_gen_ldex_count(addr);
 #ifdef HASH_LLSC
     TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
