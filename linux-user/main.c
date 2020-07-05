@@ -203,19 +203,13 @@ int x_monitor_check_and_clean(int tid, uint32_t addr)
 	pthread_mutex_lock(&x_mon_mutex);
 	x_node *p = exclusive_monitor_head->next;
 	uint32_t page_addr = addr & PAGE_MASK;
-	int page_x_count = 0;
 	while (p) {
 		if (p->page_addr == page_addr) {
 			//!!!!!!!!!!!!!
-			if (p->exclusive_addr == addr||1) {
 				p->exclusive_addr = 0;
 #ifdef X_LOG
 				fprintf(stderr, "cleaned thread %d x_addr %x\n", p->tid, p->exclusive_addr);
 #endif
-			}
-			else {
-				page_x_count++;
-			}
 		}
 		p = p->next;
 	}
@@ -223,7 +217,7 @@ int x_monitor_check_and_clean(int tid, uint32_t addr)
 	x_monitor_show("check and clean");
 #endif
 	pthread_mutex_unlock(&x_mon_mutex);
-	return page_x_count;
+	return 0;
 }
 
 

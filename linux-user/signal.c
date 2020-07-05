@@ -669,17 +669,9 @@ static int pf_llsc_segfault_handler(int host_signum, siginfo_t *pinfo, void *puc
 #ifdef PF_LOG
 	fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, perm %d\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr, is_write);
 #endif
-	//cpu_exec_end(cpu);
-	//start_exclusive();
 	//fprintf(stderr, "[pf_llsc_segfault_handler]\ti am in.\n");
+	x_monitor_check_and_clean(((CPUARMState*)cpu)->exclusive_tid, guest_addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ | PROT_WRITE);
-    //cpu_exec_step_atomic_pf(cpu);
-	int x_count = x_monitor_check_and_clean(((CPUARMState*)cpu)->exclusive_tid, guest_addr);
-	if (x_count > 0) {
-		target_mprotect(page_addr, 0x1000, PROT_READ);
-	}
-	//end_exclusive();
-	//cpu_exec_start(cpu);
     return 0;
 }
 #endif
