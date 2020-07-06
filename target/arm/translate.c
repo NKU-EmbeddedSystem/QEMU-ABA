@@ -7476,8 +7476,8 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i32 addr, int size)
 {
     if (size == 3) {
-		fprintf(stderr, "! I don't wanna deal with this situation!\n");
-		exit(233);
+		fprintf(stderr, "![gen_load_exclusive] size ==3: function not implemented!\n");
+		exit(2);
 	}
 	tcg_gen_extu_i32_i64(cpu_exclusive_addr, addr);
 	tcg_gen_movi_i32(cpu_exclusive_info, rt);
@@ -7513,8 +7513,8 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 #endif
 
     if (size == 3) {
-		fprintf(stderr, "! I don't wanna deal with this situation!\n");
-		exit(233);
+		fprintf(stderr, "![gen_load_exclusive] size ==3: function not implemented!\n");
+		exit(2);
         TCGv_i32 tmp2 = tcg_temp_new_i32();
         TCGv_i64 t64 = tcg_temp_new_i64();
 

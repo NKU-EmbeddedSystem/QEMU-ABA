@@ -279,6 +279,7 @@ static int do_strex(CPUARMState *env)
 #ifdef PF_LLSC
 	target_ulong page_addr = addr & 0xfffff000;
 	target_mprotect(page_addr, 0x1000, PROT_READ|PROT_WRITE);
+	target_mremap();
 	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, exclusive mark lost.\n", env->exclusive_tid, val, env->exclusive_val);
