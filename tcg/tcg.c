@@ -3247,6 +3247,7 @@ static void temp_load(TCGContext *s, TCGTemp *ts, TCGRegSet desired_regs,
         break;
     case TEMP_VAL_DEAD:
     default:
+		fprintf(stderr, "ts->name %s\n", ts->name);
         tcg_abort();
     }
     ts->reg = reg;

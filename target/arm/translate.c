@@ -40,8 +40,8 @@
 //#define HASH_LLSC
 #define PF_LLSC
 //#define PICO_ST_LLSC
-#define QEMU_LLSC			/* gen EXCEPTION on STREX */
-//#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
+//#define GEN_SC_EXCP			/* gen EXCEPTION on STREX */
+//#define GEN_LL_EXCP		/* gen EXCEPTION on LDREX */
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -71,7 +71,7 @@ TCGv_i32 cpu_CF, cpu_NF, cpu_VF, cpu_ZF;
 TCGv_i64 cpu_exclusive_addr;
 TCGv_i64 cpu_exclusive_val;
 static TCGv_i32 cpu_exclusive_tid;
-#ifdef QEMU_LLSC
+#ifdef GEN_SC_EXCP
 static TCGv_i64 cpu_exclusive_test;
 static TCGv_i32 cpu_exclusive_info;
 #endif
@@ -112,7 +112,7 @@ void arm_translate_init(void)
         offsetof(CPUARMState, exclusive_val), "exclusive_val");
     cpu_exclusive_tid = tcg_global_mem_new_i32(cpu_env,
         offsetof(CPUARMState, exclusive_tid), "exclusive_tid");
-#ifdef QEMU_LLSC
+#ifdef GEN_SC_EXCP
     cpu_exclusive_test = tcg_global_mem_new_i64(cpu_env,
         offsetof(CPUARMState, exclusive_test), "exclusive_test");
     cpu_exclusive_info = tcg_global_mem_new_i32(cpu_env,
@@ -7471,7 +7471,7 @@ static void gen_logicq_cc(TCGv_i32 lo, TCGv_i32 hi)
    the architecturally mandated semantics, and avoids having to monitor
    regular stores.  The compare vs the remembered value is done during
    the cmpxchg operation, but we must compare the addresses manually.  */
-#ifdef ATOMIC_LDREX
+#ifdef GEN_LL_EXCP
 static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i32 addr, int size)
 {
@@ -7557,7 +7557,7 @@ static void gen_clrex(DisasContext *s)
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
 
-#ifdef QEMU_LLSC
+#ifdef GEN_SC_EXCP
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
 {
@@ -7616,6 +7616,9 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
         }
         tcg_temp_free_i32(t2);
 
+		fprintf(stderr, "[store_exclusive]\tFunction not implemented in QEMU-ABA!\n");
+		exit(2);
+
         tcg_gen_atomic_cmpxchg_i64(o64, taddr, cpu_exclusive_val, n64,
                                    get_mem_index(s), opc);
         tcg_temp_free_i64(n64);
@@ -7627,7 +7630,10 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     } else {
         t2 = tcg_temp_new_i32();
         tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
-        tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
+	
+		// Insert helper to handle sc succeed condition through exclusive monitor.
+        tcg_gen_x_monitor_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
+        //tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
         tcg_gen_setcond_i32(TCG_COND_NE, t0, t0, t2);
         tcg_temp_free_i32(t2);
     }

@@ -694,6 +694,7 @@ DEF_HELPER_1(offload_load_exclusive_count, void, i32)
 DEF_HELPER_1(offload_store_exclusive_count, void, i32)
 DEF_HELPER_1(print_aa32_addr, void, i32)
 DEF_HELPER_2(pf_llsc_add, void, i32, i64)
+DEF_HELPER_4(x_monitor_sc, void, i32, i32, i32, i32)
 
 #ifdef TARGET_AARCH64
 #include "helper-a64.h"

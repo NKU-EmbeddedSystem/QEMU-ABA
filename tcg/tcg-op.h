@@ -859,6 +859,8 @@ void tcg_gen_ldex_count(TCGv);
 void tcg_gen_stex_count(TCGv);
 void tcg_gen_print_aa32_addr(TCGv_i32);
 void tcg_gen_pf_llsc_add(TCGv, TCGv_i64);
+void tcg_gen_x_monitor_cmpxchg_i32(TCGv_i32, TCGv, TCGv_i32,
+                                TCGv_i32, TCGArg, TCGMemOp);
 
 static inline void tcg_gen_qemu_ld8u(TCGv ret, TCGv addr, int mem_index)
 {

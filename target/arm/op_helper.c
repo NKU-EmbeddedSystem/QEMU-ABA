@@ -1037,3 +1037,11 @@ void HELPER(pf_llsc_add)(uint32_t addr, uint64_t node_addr)
 	x_monitor_set_exclusive_addr((void*)node_addr, addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ);
 }
+
+// Handle sc succeed condition through exclusive monitor.
+void HELPER(x_monitor_sc)(uint32_t retv, uint32_t addr, uint32_t cmpv, uint32_t newv)
+{
+	fprintf(stderr, "[x_monitor_sc]\thello! retv %d, addr %x, cmpv %d, newv %d\n", 
+					retv, addr, cmpv, newv);
+
+}
