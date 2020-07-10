@@ -1041,6 +1041,7 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 #ifdef LLSC_LOG
 		//fprintf(stderr, "in hash_v2_store_exclusive\n");
 #endif
+	pthread_mutex_lock(&sc_mutex);
     if (env->exclusive_addr != env->exclusive_test) {
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
@@ -1073,7 +1074,6 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
         goto fail;
     }
 	*/
-	pthread_mutex_lock(&sc_mutex);
 	/* TODO: replace mutex with this. */
 	/*
 	while (1) {
@@ -1116,11 +1116,11 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 #endif
 unlock:
 	//*(int*)g2h(hash_addr+4) = 0;
-	pthread_mutex_unlock(&sc_mutex);
 	
 fail:
     env->regs[15] += 4;
     env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
+	pthread_mutex_unlock(&sc_mutex);
 //done:
 	return;
 }
