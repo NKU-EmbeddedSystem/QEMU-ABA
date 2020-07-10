@@ -29,7 +29,7 @@
 
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
-#define LLSC_LOG
+//#define LLSC_LOG
 
 static CPUState *do_raise_exception(CPUARMState *env, uint32_t excp,
                                     uint32_t syndrome, uint32_t target_el)
@@ -1023,6 +1023,7 @@ void HELPER(print_aa32_addr)(uint32_t addr)
     fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
 }
 
+pthread_mutex_t sc_mutex = PTHREAD_MUTEX_INITIALIZER;
 void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 {
     int val;
@@ -1032,8 +1033,10 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
     uint32_t addr;
 	uint32_t hash_addr;
 	uint32_t hash_entry;
+	/*
 	int busy = 1;
 	int free = 0;
+	*/
 	int cas_ret;
 #ifdef LLSC_LOG
 		//fprintf(stderr, "in hash_v2_store_exclusive\n");
@@ -1050,6 +1053,7 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 	//segv = get_user_u32(hash_entry, hash_addr);
 	//assert(segv == 0);
 	/* Check hash entry */
+	//fprintf(stderr, "target_ulong %ld, host int %ld, uint32_t %ld\n", sizeof(target_ulong), sizeof(int), sizeof(uint32_t));
 	if (hash_entry != env->exclusive_tid) {
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, hash_entry %d, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
@@ -1069,6 +1073,9 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
         goto fail;
     }
 	*/
+	pthread_mutex_lock(&sc_mutex);
+	/* TODO: replace mutex with this. */
+	/*
 	while (1) {
 	cas_ret = __atomic_compare_exchange((int*)g2h(hash_addr+4), 
 										(int*)&free,
@@ -1076,6 +1083,7 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 										false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 	if (cas_ret == true) break;
 	}
+	*/
 
 	/* Now we got the lock */
 	/* Check hash entry again */
@@ -1091,9 +1099,9 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 	assert(size<3);
     val = env->regs[(env->exclusive_info >> 8) & 0xf];
 	int x_val = env->exclusive_val;
-	cas_ret = __atomic_compare_exchange((int*)g2h(env->exclusive_addr), 
-										(int*)&x_val,
-									   	(int*)&val, 
+	cas_ret = __atomic_compare_exchange((uint32_t*)g2h(env->exclusive_addr), 
+										(uint32_t*)&x_val,
+									   	(uint32_t*)&val, 
 										false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
 	if (cas_ret == false) {
 #ifdef LLSC_LOG
@@ -1107,7 +1115,8 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 	fprintf(stderr, "thread %d strex suc! newval %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
 #endif
 unlock:
-	*(int*)g2h(hash_addr+4) = 0;
+	//*(int*)g2h(hash_addr+4) = 0;
+	pthread_mutex_unlock(&sc_mutex);
 	
 fail:
     env->regs[15] += 4;

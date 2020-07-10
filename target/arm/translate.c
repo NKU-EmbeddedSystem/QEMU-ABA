@@ -42,7 +42,7 @@
 //#define PF_LLSC
 //#define PICO_ST_LLSC
 #define QEMU_LLSC			/* gen EXCEPTION on STREX */
-#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
+//#define ATOMIC_LDREX		/* gen EXCEPTION on LDREX */
 
 #define ENABLE_ARCH_4T    arm_dc_feature(s, ARM_FEATURE_V4T)
 #define ENABLE_ARCH_5     arm_dc_feature(s, ARM_FEATURE_V5)
@@ -1137,6 +1137,7 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
 
     addr = gen_aa32_addr(s, a32, opc);
 	/* A Hash approach to avoid ABA problem. */
+	/*
 #ifdef HASH_LLSC
     TCGv_i32 mask1 = tcg_const_i32(0x0ffffff0);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
@@ -1151,6 +1152,7 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
 #endif 
+*/
     tcg_gen_qemu_st_i32(val, addr, index, opc);
     tcg_temp_free(addr);
 }
