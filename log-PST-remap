@@ -1,0 +1,775 @@
+hhhhhhhhhhhhhhhhhhhhhhhhhhhh
+file /usr/bin/ld
+/usr/bin/ar
+[PARSEC] Benchmarks to run:  parsec.blackscholes parsec.bodytrack parsec.canneal parsec.facesim parsec.ferret parsec.fluidanimate parsec.freqmine parsec.streamcluster parsec.swaptions parsec.x264
+
+[PARSEC] [========== Running benchmark parsec.blackscholes [1] ==========]
+[PARSEC] Deleting old run directory.
+[PARSEC] Setting up run directory.
+[PARSEC] Unpacking benchmark input 'simlarge'.
+in_64K.txt
+[PARSEC] Running 'time qemu-arm-4.2.0 /home/tropping/parsec-3.0.bak/pkgs/apps/blackscholes/inst/aarch64-linux.gcc/bin/blackscholes 8 in_64K.txt prices.txt':
+[PARSEC] [---------- Beginning of output ----------]
+PARSEC Benchmark Suite Version 3.0-beta-20150206
+initialize data, time=527.758972ms
+Num of Options: 65536
+Num of Runs: 100
+Size of data: 2621440
+initialize step 2, time=1.513000ms
+WIN32ELSE
+threads running, time=3213.468994ms
+
+real	0m3.965s
+user	0m25.724s
+sys	0m0.020s
+[PARSEC] [----------    End of output    ----------]
+
+[PARSEC] [========== Running benchmark parsec.bodytrack [1] ==========]
+[PARSEC] Deleting old run directory.
+[PARSEC] Setting up run directory.
+[PARSEC] Unpacking benchmark input 'simlarge'.
+sequenceB_4/
+sequenceB_4/BodyShapeParameters.txt
+sequenceB_4/CALIB/
+sequenceB_4/CALIB/Camera1.cal
+sequenceB_4/CALIB/Camera2.cal
+sequenceB_4/CALIB/Camera3.cal
+sequenceB_4/CALIB/Camera4.cal
+sequenceB_4/CAM1/
+sequenceB_4/CAM1/image0000.bmp
+sequenceB_4/CAM1/image0001.bmp
+sequenceB_4/CAM1/image0002.bmp
+sequenceB_4/CAM1/image0003.bmp
+sequenceB_4/CAM2/
+sequenceB_4/CAM2/image0000.bmp
+sequenceB_4/CAM2/image0001.bmp
+sequenceB_4/CAM2/image0002.bmp
+sequenceB_4/CAM2/image0003.bmp
+sequenceB_4/CAM3/
+sequenceB_4/CAM3/image0000.bmp
+sequenceB_4/CAM3/image0001.bmp
+sequenceB_4/CAM3/image0002.bmp
+sequenceB_4/CAM3/image0003.bmp
+sequenceB_4/CAM4/
+sequenceB_4/CAM4/image0000.bmp
+sequenceB_4/CAM4/image0001.bmp
+sequenceB_4/CAM4/image0002.bmp
+sequenceB_4/CAM4/image0003.bmp
+sequenceB_4/FG1/
+sequenceB_4/FG1/image0000.bmp
+sequenceB_4/FG1/image0001.bmp
+sequenceB_4/FG1/image0002.bmp
+sequenceB_4/FG1/image0003.bmp
+sequenceB_4/FG2/
+sequenceB_4/FG2/image0000.bmp
+sequenceB_4/FG2/image0001.bmp
+sequenceB_4/FG2/image0002.bmp
+sequenceB_4/FG2/image0003.bmp
+sequenceB_4/FG3/
+sequenceB_4/FG3/image0000.bmp
+sequenceB_4/FG3/image0001.bmp
+sequenceB_4/FG3/image0002.bmp
+sequenceB_4/FG3/image0003.bmp
+sequenceB_4/FG4/
+sequenceB_4/FG4/image0000.bmp
+sequenceB_4/FG4/image0001.bmp
+sequenceB_4/FG4/image0002.bmp
+sequenceB_4/FG4/image0003.bmp
+sequenceB_4/InitialPose.txt
+sequenceB_4/PoseParameters.txt
+[PARSEC] Running 'time qemu-arm-4.2.0 /home/tropping/parsec-3.0.bak/pkgs/apps/bodytrack/inst/aarch64-linux.gcc/bin/bodytrack sequenceB_4 4 4 4000 5 0 8':
+[PARSEC] [---------- Beginning of output ----------]
+PARSEC Benchmark Suite Version 3.0-beta-20150206
+Threading with Posix Threads
+Number of threads : 8
+Using dataset : sequenceB_4/
+4000 particles with 5 annealing layers
+
+Processing frame 0
+Processing frame 1
+Processing frame 2
+Processing frame 3
+
+real	0m8.844s
+user	0m58.931s
+sys	0m0.092s
+[PARSEC] [----------    End of output    ----------]
+
+[PARSEC] [========== Running benchmark parsec.canneal [1] ==========]
+[PARSEC] Deleting old run directory.
+[PARSEC] Setting up run directory.
+[PARSEC] Unpacking benchmark input 'simlarge'.
+400000.nets
+[PARSEC] Running 'time qemu-arm-4.2.0 /home/tropping/parsec-3.0.bak/pkgs/kernels/canneal/inst/aarch64-linux.gcc/bin/canneal 8 15000 2000 400000.nets 128':
+[PARSEC] [---------- Beginning of output ----------]
+PARSEC Benchmark Suite Version 3.0-beta-20150206
+Threadcount: 8
+15000 swaps per temperature step
+start temperature: 2000
+netlist filename: 400000.nets
+number of temperature steps: 128
+locs created
+locs assigned
+Just saw element: 100000
+Just saw element: 200000
+Just saw element: 300000
+Just saw element: 400000
+netlist created. 400000 elements.
+Final routing is: 6.89909e+08
+
+real	0m23.218s
+user	0m35.457s
+sys	0m0.044s
+[PARSEC] [----------    End of output    ----------]
+
+[PARSEC] [========== Running benchmark parsec.facesim [1] ==========]
+[PARSEC] Deleting old run directory.
+[PARSEC] Setting up run directory.
+[PARSEC] Unpacking benchmark input 'simlarge'.
+Face_Data/
+Face_Data/Eftychis_840k/
+Face_Data/Eftychis_840k/Front_370k/
+Face_Data/Eftychis_840k/Front_370k/attachment_list.txt
+Face_Data/Eftychis_840k/Front_370k/buccinator_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/buccinator_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/corrugator_supercilii_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/corrugator_supercilii_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/cranium.attached_nodes
+Face_Data/Eftychis_840k/Front_370k/cranium_extended.attached_nodes
+Face_Data/Eftychis_840k/Front_370k/depressor_anguli_oris_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/depressor_anguli_oris_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/depressor_labii_inferioris_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/depressor_labii_inferioris_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/face_simulation.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_1.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_128.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_16.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_2.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_3.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_32.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_4.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_6.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_64.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_8.tet
+Face_Data/Eftychis_840k/Front_370k/face_simulation_original.log
+Face_Data/Eftychis_840k/Front_370k/flesh.attached_nodes
+Face_Data/Eftychis_840k/Front_370k/flesh_extended.attached_nodes
+Face_Data/Eftychis_840k/Front_370k/jaw.attached_nodes
+Face_Data/Eftychis_840k/Front_370k/jaw_joint_parameters
+Face_Data/Eftychis_840k/Front_370k/levator_anguli_oris_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/levator_anguli_oris_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/levator_labii_superioris_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/levator_labii_superioris_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/llsan_lateral_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/llsan_lateral_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/llsan_medial_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/llsan_medial_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/mentalis_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/mentalis_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/muscle_list.txt
+Face_Data/Eftychis_840k/Front_370k/nasalis_alar_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/nasalis_alar_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/nasalis_transverse.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/node_divisions_1.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_128.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_16.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_2.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_3.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_32.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_4.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_6.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_64.dat
+Face_Data/Eftychis_840k/Front_370k/node_divisions_8.dat
+Face_Data/Eftychis_840k/Front_370k/orbicularis_oculi_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/orbicularis_oculi_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/orbicularis_oris.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/particle_positions_1.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_128.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_16.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_2.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_3.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_32.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_4.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_6.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_64.dat
+Face_Data/Eftychis_840k/Front_370k/particle_positions_8.dat
+Face_Data/Eftychis_840k/Front_370k/peak_isometric_stress_list.txt
+Face_Data/Eftychis_840k/Front_370k/procerus_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/procerus_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/risorius_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/risorius_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/zygomatic_major_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/zygomatic_major_right.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/zygomatic_minor_left.constitutive_data
+Face_Data/Eftychis_840k/Front_370k/zygomatic_minor_right.constitutive_data
+Face_Data/Eftychis_840k/eftychis_cranium_collision_surface.phi
+Face_Data/Eftychis_840k/eftychis_cranium_collision_surface.rgd
+Face_Data/Eftychis_840k/eftychis_cranium_collision_surface.tri
+Face_Data/Eftychis_840k/eftychis_cranium_collision_surface_smoothed.phi
+Face_Data/Eftychis_840k/eftychis_cranium_collision_surface_smoothed.rgd
+Face_Data/Eftychis_840k/eftychis_cranium_collision_surface_smoothed.tri
+Face_Data/Eftychis_840k/eftychis_jaw_collision_surface.phi
+Face_Data/Eftychis_840k/eftychis_jaw_collision_surface.rgd
+Face_Data/Eftychis_840k/eftychis_jaw_collision_surface.tri
+Face_Data/Eftychis_840k/eftychis_jaw_collision_surface_smoothed.phi
+Face_Data/Eftychis_840k/eftychis_jaw_collision_surface_smoothed.rgd
+Face_Data/Eftychis_840k/eftychis_jaw_collision_surface_smoothed.tri
+Face_Data/Motion_Data/
+Face_Data/Motion_Data/Storytelling_Controls/
+Face_Data/Motion_Data/Storytelling_Controls/storytelling_controls.1
+Face_Data/Motion_Data/Storytelling_Controls/storytelling_controls.2
+[PARSEC] Running 'time qemu-arm-4.2.0 /home/tropping/parsec-3.0.bak/pkgs/apps/facesim/inst/aarch64-linux.gcc/bin/facesim -timing -threads 8':
+[PARSEC] [---------- Beginning of output ----------]
+PARSEC Benchmark Suite Version 3.0-beta-20150206
+Simulation                                        Can't open log file Storytelling/output/log.txt for writing
+
+
+real	0m0.028s
+user	0m0.011s
+sys	0m0.011s
+[PARSEC] [----------    End of output    ----------]
+
+[PARSEC] [========== Running benchmark parsec.ferret [1] ==========]
+[PARSEC] Deleting old run directory.
+[PARSEC] Setting up run directory.
+[PARSEC] Unpacking benchmark input 'simlarge'.
+corel/
+corel/__cass.env
+corel/corel.raw
+corel/lsh.lsh
+corel/map_corel.map
+queries/
+queries/acorn.jpg
+queries/air-fighter.jpg
+queries/airplane-2.jpg
+queries/airplane-takeoff-3.jpg
+queries/alcatraz-island-prison.jpg
+queries/american-flag-3.jpg
+queries/apartment.jpg
+queries/apollo-2.jpg
+queries/apollo-earth.jpg
+queries/apple-11.jpg
+queries/apple-14.jpg
+queries/apple-16.jpg
+queries/apple-7.jpg
+queries/aquarium-fish-25.jpg
+queries/arches-9.jpg
+queries/arches.jpg
+queries/archipelago-2.jpg
+queries/archipelago.jpg
+queries/balboa-park.jpg
+queries/balloons-14.jpg
+queries/banana-1.jpg
+queries/bay.jpg
+queries/beach-2.jpg
+queries/bee.jpg
+queries/bird-2.jpg
+queries/black-currant-4.jpg
+queries/black-headed-sheep.jpg
+queries/boat-race.jpg
+queries/bookshelf.jpg
+queries/branch-2.jpg
+queries/buttercup-2.jpg
+queries/cable-2.jpg
+queries/cabrillo-national-monument.jpg
+queries/cactus-115.jpg
+queries/cactus-71.jpg
+queries/caesars-palace-2.jpg
+queries/canyon.jpg
+queries/cheese-plate.jpg
+queries/church-tower-with-mountain-in-background.jpg
+queries/civic-si-2.jpg
+queries/clip-3.jpg
+queries/clock-2.jpg
+queries/clock.jpg
+queries/clouds-2.jpg
+queries/coast.jpg
+queries/coffee-beans-2.jpg
+queries/columbia-start.jpg
+queries/concrete-cross.jpg
+queries/crawfish-3.jpg
+queries/death-valley-sand-dunes.jpg
+queries/duck-4.jpg
+queries/duck-5.jpg
+queries/egret-2.jpg
+queries/ellen-browning-scripps-park.jpg
+queries/face-10.jpg
+queries/face-11.jpg
+queries/face-12.jpg
+queries/face-13.jpg
+queries/face-14.jpg
+queries/face-15.jpg
+queries/face-16.jpg
+queries/face-17.jpg
+queries/face-18.jpg
+queries/face-19.jpg
+queries/face-2.jpg
+queries/face-20.jpg
+queries/face-21.jpg
+queries/face-22.jpg
+queries/face-23.jpg
+queries/face-24.jpg
+queries/face-25.jpg
+queries/face-26.jpg
+queries/face-27.jpg
+queries/face-28.jpg
+queries/face-29.jpg
+queries/face-3.jpg
+queries/face-30.jpg
+queries/face-31.jpg
+queries/face-32.jpg
+queries/face-33.jpg
+queries/face-34.jpg
+queries/face-35.jpg
+queries/face-36.jpg
+queries/face-4.jpg
+queries/face-5.jpg
+queries/face-6.jpg
+queries/face-7.jpg
+queries/face-8.jpg
+queries/face-9.jpg
+queries/face.jpg
+queries/fajitas.jpg
+queries/fake-berries.jpg
+queries/fallbrook-avocado-festival.jpg
+queries/fallen-branshy-tree.jpg
+queries/falls-2.jpg
+queries/falls-in-glacier.jpg
+queries/falls.jpg
+queries/farm-2.jpg
+queries/farm.jpg
+queries/farmers-market-2.jpg
+queries/farmers-market.jpg
+queries/field-20.jpg
+queries/figs.jpg
+queries/fireworks-11.jpg
+queries/fly.jpg
+queries/food-18.jpg
+queries/forest-16.jpg
+queries/forest-3.jpg
+queries/forest-38.jpg
+queries/forest-54.jpg
+queries/forest-65.jpg
+queries/la-jolla-cliffs-2.jpg
+queries/la-jolla-cliffs.jpg
+queries/la-jolla-cove-10.jpg
+queries/la-jolla-cove-11.jpg
+queries/la-jolla-cove-12.jpg
+queries/la-jolla-cove-13.jpg
+queries/la-jolla-cove-14.jpg
+queries/la-jolla-cove-2.jpg
+queries/la-jolla-cove-3.jpg
+queries/la-jolla-cove-4.jpg
+queries/la-jolla-cove-5.jpg
+queries/la-jolla-cove-6.jpg
+queries/la-jolla-cove-7.jpg
+queries/la-jolla-cove-8.jpg
+queries/la-jolla-cove-9.jpg
+queries/la-jolla-cove.jpg
+queries/la-jolla-seal-beach.jpg
+queries/la-jolla-shores.jpg
+queries/la-jolla-squirrels.jpg
+queries/lady-bug.jpg
+queries/ladybug-closeup.jpg
+queries/ladybugs.jpg
+queries/lake-2.jpg
+queries/lake-20.jpg
+queries/lake-21.jpg
+queries/lake-22.jpg
+queries/lake-23.jpg
+queries/lake-24.jpg
+queries/lake-25.jpg
+queries/lake-26.jpg
+queries/lake-27.jpg
+queries/lake-28.jpg
+queries/lake-29.jpg
+queries/lake-3.jpg
+queries/lake-30.jpg
+queries/lake-31.jpg
+queries/lake-32.jpg
+queries/lake-33.jpg
+queries/lake-34.jpg
+queries/lake-35.jpg
+queries/lake-36.jpg
+queries/lake-37.jpg
+queries/lake-38.jpg
+queries/lake-52.jpg
+queries/lake-53.jpg
+queries/lake-54.jpg
+queries/lake-55.jpg
+queries/lake-56.jpg
+queries/lake-57.jpg
+queries/lake-58.jpg
+queries/lake-59.jpg
+queries/lake-6.jpg
+queries/lake-60.jpg
+queries/lake-61.jpg
+queries/lake-62.jpg
+queries/lake-63.jpg
+queries/lake-64.jpg
+queries/lake-65.jpg
+queries/lake-66.jpg
+queries/lake-67.jpg
+queries/lake-68.jpg
+queries/lake-69.jpg
+queries/lake-7.jpg
+queries/lake-8.jpg
+queries/lake-9.jpg
+queries/lake-mcdonald-in-glacier.jpg
+queries/lake-mcdonald.jpg
+queries/lake-miramar.jpg
+queries/lake-people.jpg
+queries/lake-rock-in-morning-mist-2.jpg
+queries/lake-rock-in-morning-mist-3.jpg
+queries/lake-rock-in-morning-mist.jpg
+queries/lake-rocks-in-morning-mist-2.jpg
+queries/lake-rocks-in-morning-mist.jpg
+queries/lake-side.jpg
+queries/lake-water.jpg
+queries/lake.jpg
+queries/lamar-valley.jpg
+queries/lamp-flowers.jpg
+queries/lancashire-cheese.jpg
+queries/landing-lights.jpg
+queries/lantern.jpg
+queries/laptop.jpg
+queries/lapwing-in-snow.jpg
+queries/lapwings-in-snowy-field.jpg
+queries/las-vegas-strip.jpg
+queries/lasagna.jpg
+queries/lava-2.jpg
+queries/lava-3.jpg
+queries/lava-4.jpg
+queries/lava.jpg
+queries/leaf-2.jpg
+queries/leaf-3.jpg
+queries/leaf-4.jpg
+queries/leaf-5.jpg
+queries/leaf.jpg
+queries/leaves-in-a-stream.jpg
+queries/leaves-in-sun-2.jpg
+queries/leaves-in-sun-3.jpg
+queries/leaves-in-sun.jpg
+queries/leaves-water-drops-2.jpg
+queries/leaves-water-drops-3.jpg
+queries/leaves-water-drops.jpg
+queries/leaves.jpg
+queries/lemor.jpg
+queries/lemurs-eating.jpg
+queries/lens.jpg
+queries/liberty-cap.jpg
+queries/library.jpg
+queries/lichens-2.jpg
+queries/lichens.jpg
+queries/lighter.jpg
+queries/lighthouse.jpg
+queries/lights-2.jpg
+queries/lights-3.jpg
+queries/lights.jpg
+queries/limberger-cheese.jpg
+queries/lime-and-kiwi.jpg
+queries/lime-spider.jpg
+queries/limestone-quarry-2.jpg
+queries/limestone-quarry.jpg
+queries/lincolnshire-poacher-cheese.jpg
+queries/lion.jpg
+queries/little-bird.jpg
+queries/little-italy-sign.jpg
+queries/little-piggies.jpg
+queries/logan-pass-trail.jpg
+queries/logan-pass.jpg
+queries/lombard-street.jpg
+queries/london-bridge.jpg
+queries/long-beach-2.jpg
+queries/long-beach.jpg
+queries/long-horned-cattle-2.jpg
+queries/long-horned-cattle.jpg
+queries/lots-of-pots.jpg
+queries/lotus.jpg
+queries/lough-erne.jpg
+queries/lough-gill-2.jpg
+queries/lough-gill.jpg
+queries/lough-gur.jpg
+queries/lumbering-bear.jpg
+queries/lunar-eclipse.jpg
+queries/lynx-on-tree-log.jpg
+queries/lynx-sitting.jpg
+queries/queen-mary-2.jpg
+[PARSEC] Running 'time qemu-arm-4.2.0 /home/tropping/parsec-3.0.bak/pkgs/apps/ferret/inst/aarch64-linux.gcc/bin/ferret corel lsh queries 10 20 8 output.txt':
+[PARSEC] [---------- Beginning of output ----------]
+PARSEC Benchmark Suite Version 3.0-beta-20150206
+(3,1)
+(4,2)
+(6,3)
+(7,4)
+(9,5)
+(10,6)
+(10,7)
+(12,8)
+(13,9)
+(13,10)
+(13,11)
+(14,12)
+(17,13)
+(17,14)
+(20,15)
+(20,16)
+(20,17)
+(24,18)
+(25,19)
+(26,20)
+(26,21)
+(27,22)
+(27,23)
+(28,24)
+(28,25)
+(28,26)
+(30,27)
+(30,28)
+(31,29)
+(32,30)
+(33,31)
+(34,32)
+(36,33)
+(36,34)
+(38,35)
+(39,36)
+(39,37)
+(41,38)
+(41,39)
+(43,40)
+(44,41)
+(44,42)
+(45,43)
+(48,44)
+(49,45)
+(49,46)
+(50,47)
+(51,48)
+(52,49)
+(52,50)
+(52,51)
+(56,52)
+(56,53)
+(57,54)
+(62,55)
+(62,56)
+(63,57)
+(63,58)
+(65,59)
+(66,60)
+(66,61)
+(67,62)
+(69,63)
+(70,64)
+(70,65)
+(71,66)
+(72,67)
+(75,68)
+(76,69)
+(76,70)
+(76,71)
+(78,72)
+(78,73)
+(79,74)
+(80,75)
+(80,76)
+(82,77)
+(83,78)
+(84,79)
+(85,80)
+(86,81)
+(87,82)
+(87,83)
+(90,84)
+(90,85)
+(90,86)
+(92,87)
+(92,88)
+(92,89)
+(92,90)
+(95,91)
+(96,92)
+(96,93)
+(96,94)
+(97,95)
+(100,96)
+(102,97)
+(102,98)
+(103,99)
+(105,100)
+(106,101)
+(106,102)
+(106,103)
+(108,104)
+(109,105)
+(109,106)
+(110,107)
+(111,108)
+(111,109)
+(112,110)
+(112,111)
+(114,112)
+(116,113)
+(116,114)
+(118,115)
+(119,116)
+(123,117)
+(123,118)
+(123,119)
+(124,120)
+(125,121)
+(126,122)
+(127,123)
+(128,124)
+(128,125)
+(129,126)
+(131,127)
+(133,128)
+(134,129)
+(134,130)
+(136,131)
+(136,132)
+(137,133)
+(139,134)
+(139,135)
+(142,136)
+(142,137)
+(142,138)
+(143,139)
+(143,140)
+(144,141)
+(146,142)
+(147,143)
+(150,144)
+(151,145)
+(151,146)
+(151,147)
+(152,148)
+(154,149)
+(155,150)
+(155,151)
+(157,152)
+(157,153)
+(158,154)
+(158,155)
+(158,156)
+(161,157)
+(161,158)
+(165,159)
+(166,160)
+(166,161)
+(168,162)
+(168,163)
+(168,164)
+(169,165)
+(169,166)
+(169,167)
+(172,168)
+(173,169)
+(173,170)
+(174,171)
+(174,172)
+(176,173)
+(178,174)
+(179,175)
+(179,176)
+(179,177)
+(180,178)
+(181,179)
+(183,180)
+(184,181)
+(186,182)
+(188,183)
+(189,184)
+(190,185)
+(190,186)
+(192,187)
+(193,188)
+(194,189)
+(194,190)
+(194,191)
+(194,192)
+(194,193)
+(198,194)
+(200,195)
+(200,196)
+(201,197)
+(201,198)
+(201,199)
+(204,200)
+(204,201)
+(205,202)
+(205,203)
+(205,204)
+(207,205)
+(208,206)
+(209,207)
+(209,208)
+(211,209)
+(213,210)
+(215,211)
+(215,212)
+(217,213)
+(218,214)
+(219,215)
+(221,216)
+(221,217)
+(222,218)
+(223,219)
+(224,220)
+(225,221)
+(225,222)
+(225,223)
+(227,224)
+(227,225)
+(229,226)
+(231,227)
+(232,228)
+(232,229)
+(233,230)
+(233,231)
+(235,232)
+(236,233)
+(237,234)
+(239,235)
+(239,236)
+(240,237)
+(240,238)
+(243,239)
+(244,240)
+(244,241)
+(244,242)
+(247,243)
+(247,244)
+(248,245)
+(250,246)
+(251,247)
+(251,248)
+(252,249)
+(254,250)
+(254,251)
+(256,252)
+(256,253)
+(256,254)
+(256,255)
+(256,256)
+QUERY TIME: 10.830 seconds
+
+real	0m11.070s
+user	0m56.396s
+sys	0m0.140s
+[PARSEC] [----------    End of output    ----------]
+
+[PARSEC] [========== Running benchmark parsec.fluidanimate [1] ==========]
+[PARSEC] Deleting old run directory.
+[PARSEC] Setting up run directory.
+[PARSEC] Unpacking benchmark input 'simlarge'.
+in_300K.fluid
+[PARSEC] Running 'time qemu-arm-4.2.0 /home/tropping/parsec-3.0.bak/pkgs/apps/fluidanimate/inst/aarch64-linux.gcc/bin/fluidanimate 8 5 in_300K.fluid out.fluid':
+[PARSEC] [---------- Beginning of output ----------]
+PARSEC Benchmark Suite Version 3.0-beta-20150206
+Loading file "in_300K.fluid"...
+Number of cells: 135424
+Grids steps over x, y, z: 0.00282609 0.0028125 0.00282609
+Number of particles: 305809

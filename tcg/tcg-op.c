@@ -3092,8 +3092,8 @@ void tcg_gen_x_monitor_cmpxchg_i32(TCGv_i32 retv, TCGv addr, TCGv_i32 cmpv,
             tcg_temp_free_i32(oi);
         }
 #else
-        gen(retv, cpu_env, addr, cmpv, newv);
-		gen_helper_x_monitor_sc(retv, addr, cmpv, newv);
+        //gen(retv, cpu_env, addr, cmpv, newv);
+		gen_helper_x_monitor_sc(retv, cpu_env, addr, cmpv, newv);
 #endif
 
         if (memop & MO_SIGN) {

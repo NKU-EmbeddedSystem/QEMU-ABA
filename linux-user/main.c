@@ -55,6 +55,7 @@ struct timeb t_start, t_multi_start, t_multi_end, t_end;
 long long t_single, t_multi;
 int is_multi;
 int thread_count;
+pthread_mutex_t g_sc_lock;
 #define X_MONITOR
 //#define X_LOG
 #ifdef X_MONITOR
@@ -795,6 +796,8 @@ int main(int argc, char **argv, char **envp)
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
+
+	pthread_mutex_init(&g_sc_lock, NULL);
 
     envlist = envlist_create();
 

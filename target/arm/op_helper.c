@@ -1038,10 +1038,55 @@ void HELPER(pf_llsc_add)(uint32_t addr, uint64_t node_addr)
 	target_mprotect(page_addr, 0x1000, PROT_READ);
 }
 
+
+extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
+extern int x_monitor_check_and_clean(int tid, uint32_t addr);
+extern pthread_mutex_t g_sc_lock;
+#define TO_PAGE(x) (x >> 12 << 12)
+#define PAGE_SIZE 0x1000
 // Handle sc succeed condition through exclusive monitor.
-void HELPER(x_monitor_sc)(uint32_t retv, uint32_t addr, uint32_t cmpv, uint32_t newv)
+uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv, uint32_t newv)
 {
-	fprintf(stderr, "[x_monitor_sc]\thello! retv %d, addr %x, cmpv %d, newv %d\n", 
-					retv, addr, cmpv, newv);
+	//fprintf(stderr, "[x_monitor_sc]\thello! addr %x, cmpv %x, newv %x\n", 
+	//				addr, cmpv, newv);
+
+	uint32_t *haddr = (uint32_t*)g2h(addr);
+	uint32_t curv = *haddr;
+
+	//TODO: mov curv comparing to IR
+	if (curv != cmpv) {
+		return curv;
+	}
+
+	pthread_mutex_lock(&g_sc_lock);
+	//TODO: use an already mapped one
+	void *pold, *pnew;
+	pold = (void*)TO_PAGE((uint64_t)haddr);
+	pnew = mmap(0, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (((long)mremap(pold, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pnew)) == -1) {
+		perror("[x_monitor_sc]\tmremap");
+		exit(2);
+	}
+	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
+		//fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
+
+		if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
+			perror("[x_monitor_sc]\tmremap");
+			exit(2);
+		}
+		pthread_mutex_unlock(&g_sc_lock);
+		return curv;
+	}
+	x_monitor_check_and_clean(env->exclusive_tid, addr);
+	mprotect(pnew, PAGE_SIZE, PROT_READ | PROT_WRITE);
+	uint32_t ret = __sync_val_compare_and_swap(haddr - (uint32_t*)pold + (uint32_t*)pnew, cmpv, newv);
+	if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
+		perror("[x_monitor_sc]\tmremap");
+		exit(2);
+	}
+
+	pthread_mutex_unlock(&g_sc_lock);
+	//fprintf(stderr, "[x_monitor_sc]\tcmpxchged! thread %d strex! retv %x\n", env->exclusive_tid, ret);
+	return ret;
 
 }
