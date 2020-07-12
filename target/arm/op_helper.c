@@ -1061,6 +1061,13 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 	}
 
 	pthread_mutex_lock(&g_sc_lock);
+    if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
+		fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
+
+		pthread_mutex_unlock(&g_sc_lock);
+		return cmpv+1;
+	}
+	x_monitor_check_and_clean(env->exclusive_tid, addr);
 	//TODO: use an already mapped one
 	void *pold, *pnew;
 	pold = (void*)TO_PAGE((uint64_t)haddr);
@@ -1069,17 +1076,7 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 		perror("[x_monitor_sc]\tmremap");
 		exit(2);
 	}
-	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
-		fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
-
-		if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
-			perror("[x_monitor_sc]\tmremap");
-			exit(2);
-		}
-		pthread_mutex_unlock(&g_sc_lock);
-		return cmpv+1;
-	}
-	x_monitor_check_and_clean(env->exclusive_tid, addr);
+	
 	mprotect(pnew, PAGE_SIZE, PROT_READ | PROT_WRITE);
 	uint32_t ret = __sync_val_compare_and_swap(haddr - (uint32_t*)pold + (uint32_t*)pnew, cmpv, newv);
 	if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
@@ -1088,7 +1085,7 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 	}
 
 	pthread_mutex_unlock(&g_sc_lock);
-	fprintf(stderr, "[x_monitor_sc]\tcmpxchged! thread %d strex! retv %x\n", env->exclusive_tid, ret);
+	fprintf(stderr, "[x_monitor_sc]\ttid:%d cmpxchged! retv %x\n", env->exclusive_tid, ret);
 	return ret;
 
 }

@@ -7663,7 +7663,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             time_t host_time;
             if (get_user_sal(host_time, arg1))
                 return -TARGET_EFAULT;
-            return get_errno(stime(&host_time));
+            return 0 /*get_errno(stime(&host_time))*/;
         }
 #endif
 #ifdef TARGET_NR_alarm /* not on alpha */
