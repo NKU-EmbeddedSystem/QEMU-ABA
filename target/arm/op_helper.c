@@ -1028,27 +1028,29 @@ void HELPER(print_aa32_addr)(uint32_t addr)
     fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
 }
 
+extern pthread_mutex_t g_sc_lock;
 extern int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
 extern int target_mprotect(abi_ulong, abi_ulong, int);
 void HELPER(pf_llsc_add)(uint32_t addr, uint64_t node_addr)
 {
+	pthread_mutex_lock(&g_sc_lock);
 	target_ulong page_addr = addr & 0xfffff000;
-    //fprintf(stderr, "[pf_llsc_add]\taddr = %x, node_addr = %lx\n", page_addr, node_addr);
+    fprintf(stderr, "[pf_llsc_add]\taddr = %x, node_addr = %lx\n", page_addr, node_addr);
 	x_monitor_set_exclusive_addr((void*)node_addr, addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ);
+	pthread_mutex_unlock(&g_sc_lock);
 }
 
 
 extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
 extern int x_monitor_check_and_clean(int tid, uint32_t addr);
-extern pthread_mutex_t g_sc_lock;
 #define TO_PAGE(x) (x >> 12 << 12)
 #define PAGE_SIZE 0x1000
 // Handle sc succeed condition through exclusive monitor.
 uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv, uint32_t newv)
 {
-	//fprintf(stderr, "[x_monitor_sc]\thello! addr %x, cmpv %x, newv %x\n", 
-	//				addr, cmpv, newv);
+	fprintf(stderr, "[x_monitor_sc]\thello! addr %x, cmpv %x, newv %x\n", 
+					addr, cmpv, newv);
 
 	uint32_t *haddr = (uint32_t*)g2h(addr);
 	uint32_t curv = *haddr;
@@ -1068,14 +1070,14 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 		exit(2);
 	}
 	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
-		//fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
+		fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
 
 		if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
 			perror("[x_monitor_sc]\tmremap");
 			exit(2);
 		}
 		pthread_mutex_unlock(&g_sc_lock);
-		return curv;
+		return cmpv+1;
 	}
 	x_monitor_check_and_clean(env->exclusive_tid, addr);
 	mprotect(pnew, PAGE_SIZE, PROT_READ | PROT_WRITE);
@@ -1086,7 +1088,7 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 	}
 
 	pthread_mutex_unlock(&g_sc_lock);
-	//fprintf(stderr, "[x_monitor_sc]\tcmpxchged! thread %d strex! retv %x\n", env->exclusive_tid, ret);
+	fprintf(stderr, "[x_monitor_sc]\tcmpxchged! thread %d strex! retv %x\n", env->exclusive_tid, ret);
 	return ret;
 
 }
