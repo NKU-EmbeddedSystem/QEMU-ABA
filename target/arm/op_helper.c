@@ -1031,11 +1031,11 @@ void HELPER(print_aa32_addr)(uint32_t addr)
 extern pthread_mutex_t g_sc_lock;
 extern int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
 extern int target_mprotect(abi_ulong, abi_ulong, int);
-void HELPER(pf_llsc_add)(uint32_t addr, uint64_t node_addr)
+void HELPER(pf_llsc_add)(CPUARMState *env, uint32_t addr, uint64_t node_addr)
 {
 	pthread_mutex_lock(&g_sc_lock);
 	target_ulong page_addr = addr & 0xfffff000;
-    fprintf(stderr, "[pf_llsc_add]\taddr = %x, node_addr = %lx\n", page_addr, node_addr);
+    fprintf(stderr, "[pf_llsc_add]\ttid %d, addr = %x, node_addr = %lx\n", env->exclusive_tid, page_addr, node_addr);
 	x_monitor_set_exclusive_addr((void*)node_addr, addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ);
 	pthread_mutex_unlock(&g_sc_lock);
@@ -1049,8 +1049,8 @@ extern int x_monitor_check_and_clean(int tid, uint32_t addr);
 // Handle sc succeed condition through exclusive monitor.
 uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv, uint32_t newv)
 {
-	fprintf(stderr, "[x_monitor_sc]\thello! addr %x, cmpv %x, newv %x\n", 
-					addr, cmpv, newv);
+	fprintf(stderr, "[x_monitor_sc]\ttid %d, hello! addr %x, cmpv %x, newv %x\n", 
+					env->exclusive_tid, addr, cmpv, newv);
 
 	uint32_t *haddr = (uint32_t*)g2h(addr);
 	uint32_t curv = *haddr;

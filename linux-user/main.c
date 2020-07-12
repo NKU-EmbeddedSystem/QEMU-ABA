@@ -57,7 +57,7 @@ int is_multi;
 int thread_count;
 pthread_mutex_t g_sc_lock;
 #define X_MONITOR
-#define X_LOG
+//#define X_LOG
 #ifdef X_MONITOR
 /* Exclusive Monitor */
 #define PAGE_MASK 0xfffff000
@@ -84,7 +84,7 @@ void x_monitor_show(const char *info)
 	sprintf(buf, "[x_monitor_show] in  %s\n", info);
 	x_node *p = exclusive_monitor_head->next;
 	while (p) {
-		sprintf(buf, "%sthread %d x_addr %x x_page %x\n", buf, p->tid, p->exclusive_addr, p->page_addr);
+		sprintf(buf, "%snode addr %p thread %d x_addr %x x_page %x\n", buf, p, p->tid, p->exclusive_addr, p->page_addr);
 		p = p->next;
 	}
 	fprintf(stderr, "%s", buf);
@@ -195,9 +195,13 @@ int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr)
 }
 int x_monitor_check_exclusive(void* p_node, uint32_t addr)
 {
+	pthread_mutex_lock(&x_mon_mutex);
 	x_node *p = (x_node*)p_node;
+#ifdef X_LOG
 	x_monitor_show("check ex");
 	fprintf(stderr, "tid %d, node addr %p, x addr = %x, addr = %p\n", p->tid, p_node, p->exclusive_addr, (void*)(long)addr);
+#endif
+	pthread_mutex_unlock(&x_mon_mutex);
 	return (p->exclusive_addr == addr);
 }
 

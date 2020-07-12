@@ -693,7 +693,7 @@ DEF_HELPER_FLAGS_2(frint64_d, TCG_CALL_NO_RWG, f64, f64, ptr)
 DEF_HELPER_1(offload_load_exclusive_count, void, i32)
 DEF_HELPER_1(offload_store_exclusive_count, void, i32)
 DEF_HELPER_1(print_aa32_addr, void, i32)
-DEF_HELPER_2(pf_llsc_add, void, i32, i64)
+DEF_HELPER_3(pf_llsc_add, void, env, i32, i64)
 DEF_HELPER_FLAGS_4(x_monitor_sc, TCG_CALL_NO_WG, i32, env, tl, i32, i32)
 //DEF_HELPER_FLAGS_4(atomic_cmpxchgb, TCG_CALL_NO_WG, i32, env, tl, i32, i32)
 
