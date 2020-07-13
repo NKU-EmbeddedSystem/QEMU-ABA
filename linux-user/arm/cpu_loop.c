@@ -257,10 +257,7 @@ static int do_strex(CPUARMState *env)
     int rc = 1;
     int segv = 0;
     uint32_t addr;
-#ifdef HASH_LLSC
-	uint32_t hash_addr;
-	uint32_t hash_entry;
-#endif
+f
     //fprintf(stderr, "[do_strex]\tdo_strex\n");
     start_exclusive();
 
@@ -287,19 +284,7 @@ static int do_strex(CPUARMState *env)
 		goto fail;
 	}
 #endif
-#ifdef HASH_LLSC
-	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
-	segv = get_user_u32(hash_entry, hash_addr);
-	assert(segv == 0);
-	if (hash_entry != env->exclusive_tid) {
 
-#ifdef LLSC_LOG
-		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, hash_entry %x, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
-#endif
-        goto fail;
-    }
-
-#endif
 	
     size = env->exclusive_info & 0xf;
     switch (size) {

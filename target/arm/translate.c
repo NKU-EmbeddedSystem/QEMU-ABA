@@ -7496,7 +7496,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     s->is_ldex = true;
 
 #ifdef _HTM
-    gen_helper_xbegin(cpu_env);
+    gen_helper_xbegin(cpu_env, addr);
 #endif
 
     if (size == 3) {
@@ -7634,7 +7634,10 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_temp_free(taddr);
 #ifdef _HTM
 	tcg_gen_movi_i32(cpu_R[rd], 0);
-    gen_helper_xend();
+    tcg_gen_extu_i32_i64(cpu_exclusive_test, addr);
+    tcg_gen_movi_i32(cpu_exclusive_info,
+                     size | (rd << 4) | (rt << 8) | (rt2 << 12));
+    gen_helper_xend(cpu_env);
 #else
     tcg_gen_mov_i32(cpu_R[rd], t0);
 #endif

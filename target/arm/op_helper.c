@@ -1091,7 +1091,7 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 
 }
 
-void HELPER(xbegin)(CPUARMState *env)
+void HELPER(xbegin)(CPUARMState *env, target_ulong addr)
 {
     int status;
     int retries = 100;
@@ -1103,21 +1103,27 @@ void HELPER(xbegin)(CPUARMState *env)
             retries--;
             goto retry;
         }
-        stop_the_world_lock(env_cpu(env));
+        target_ulong page_addr = addr & 0xfffff000;
+        fprintf(stderr, "[pf_llsc_add]\ttid %d, addr = %x", env->exclusive_tid, addr);
+        x_monitor_set_exclusive_addr((void *)env->exclusive_node, addr);
+        target_mprotect(page_addr, 0x1000, PROT_READ);
+        //stop_the_world_lock(env_cpu(env));
     }
 }
 
-void HELPER(xend)(void)
+void HELPER(xend)(CPUARMState *env)
 {
     if (likely(htm_test())) {
         htm_end();
     } else {
-        stop_the_world_unlock();
+        //stop_the_world_unlock();
+        raise_exception(env, EXCP_STREX, syn_uncategorized(),
+                    exception_target_el(env));
     }
 }
 
 uint32_t HELPER(x_ok)(void)
 {
-    return likely(htm_test()) || stw_held;
+    return likely(htm_test());
 }
 
