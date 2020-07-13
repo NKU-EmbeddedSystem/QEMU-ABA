@@ -39,6 +39,12 @@ typedef ram_addr_t tb_page_addr_t;
 
 #include "qemu/log.h"
 
+void stop_the_world_lock(CPUState *cpu);
+void stop_the_world_unlock(void);
+void stop_the_world_reset(void);
+void stop_the_world_sleep(void);
+extern __thread bool stw_held;
+
 void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int max_insns);
 void restore_state_to_opc(CPUArchState *env, TranslationBlock *tb,
                           target_ulong *data);

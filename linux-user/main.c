@@ -46,6 +46,13 @@
 #include "crypto/init.h"
 #include <sys/timeb.h>
 
+
+static pthread_cond_t stw_sleep_cond   = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t stw_request_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t stw_lock = PTHREAD_MUTEX_INITIALIZER;
+static int stw_requests;
+static bool stw_ongoing;
+__thread bool stw_held;
 /* Globals */
 int ldex_count;
 int stex_count;
@@ -226,12 +233,9 @@ int x_monitor_check_and_clean(int tid, uint32_t addr)
 	pthread_mutex_unlock(&x_mon_mutex);
 	return 0;
 }
-
-
-
-
-
 #endif
+
+
 
 char *exec_path;
 
@@ -312,6 +316,7 @@ void fork_start(void)
     start_exclusive();
     mmap_fork_start();
     cpu_list_lock();
+	pthread_mutex_lock(&stw_lock);
 }
 
 void fork_end(int child)
@@ -326,15 +331,92 @@ void fork_end(int child)
                 QTAILQ_REMOVE_RCU(&cpus, cpu, node);
             }
         }
+		pthread_mutex_init(&stw_lock, NULL);
+        stw_held = false;
+        stw_ongoing = false;
+		pthread_cond_init(&stw_sleep_cond, NULL);
+        pthread_cond_init(&stw_request_cond, NULL);
         qemu_init_cpu_list();
         gdbserver_fork(thread_cpu);
         /* qemu_init_cpu_list() takes care of reinitializing the
          * exclusive state, so we don't need to end_exclusive() here.
          */
     } else {
+		pthread_mutex_unlock(&stw_lock);
         cpu_list_unlock();
         end_exclusive();
     }
+}
+
+void stop_the_world_lock(CPUState *cpu)
+{
+    CPUState *other;
+
+    if (stw_held) {
+        return;
+    }
+    rcu_read_unlock();
+
+    pthread_mutex_lock(&stw_lock);
+    if (stw_ongoing) {
+        stw_requests++;
+        /* wait for ongoing stops to occur */
+        while (stw_ongoing) {
+            pthread_cond_wait(&stw_request_cond, &stw_lock);
+        }
+        stw_requests--;
+    }
+
+    /* it's our turn! */
+    stw_ongoing = true;
+    stw_held = true;
+    CPU_FOREACH(other) {
+        if (other != cpu) {
+            cpu_exit(other);
+        }
+    }
+    synchronize_rcu();
+}
+
+void stop_the_world_unlock(void)
+{
+    if (!stw_held) {
+        return;
+    }
+    assert(stw_ongoing);
+
+    if (stw_requests) {
+        pthread_cond_signal(&stw_request_cond);
+    } else {
+        pthread_cond_broadcast(&stw_sleep_cond);
+    }
+    /*
+     * Make sure the next STW requester (if any) will perceive that we're
+     * in an RCU read critical section
+     */
+    rcu_read_lock();
+    stw_ongoing = false;
+    stw_held = false;
+    pthread_mutex_unlock(&stw_lock);
+}
+
+void stop_the_world_reset(void)
+{
+    if (likely(!stw_held)) {
+        return;
+    }
+    stop_the_world_unlock();
+}
+
+void stop_the_world_sleep(void)
+{
+    pthread_mutex_lock(&stw_lock);
+    if (unlikely(stw_ongoing)) {
+        while (stw_ongoing) {
+            pthread_cond_wait(&stw_sleep_cond, &stw_lock);
+        }
+    }
+    pthread_mutex_unlock(&stw_lock);
 }
 
 __thread CPUState *thread_cpu;

@@ -695,6 +695,10 @@ DEF_HELPER_1(offload_store_exclusive_count, void, i32)
 DEF_HELPER_1(print_aa32_addr, void, i32)
 DEF_HELPER_3(pf_llsc_add, void, env, i32, i64)
 DEF_HELPER_FLAGS_4(x_monitor_sc, TCG_CALL_NO_WG, i32, env, tl, i32, i32)
+
+DEF_HELPER_1(xbegin, void, env)
+DEF_HELPER_0(x_ok, i32)
+DEF_HELPER_0(xend, void)
 //DEF_HELPER_FLAGS_4(atomic_cmpxchgb, TCG_CALL_NO_WG, i32, env, tl, i32, i32)
 
 #ifdef TARGET_AARCH64

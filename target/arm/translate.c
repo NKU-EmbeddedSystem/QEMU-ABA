@@ -7491,25 +7491,11 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
 	//tcg_gen_stex_count(addr);
 	//tcg_gen_ldex_count(addr);
-#ifdef HASH_LLSC
-    TCGv_i32 mask1 = tcg_const_i32(0x0fffffff);
-    TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
-    TCGv_i32 hash_addr = tcg_temp_new_i32();
-#endif
 
     s->is_ldex = true;
-#ifdef HASH_LLSC
-    //tcg_gen_ldex_count(addr);
-    //hash method
-    tcg_gen_and_i32(hash_addr, addr, mask1);
-    tcg_gen_or_i32(hash_addr, hash_addr, mask2);
-    gen_aa32_st32(s, cpu_exclusive_tid, hash_addr, get_mem_index(s));
-    tcg_temp_free(mask1);
-    tcg_temp_free(mask2);
-    tcg_temp_free(hash_addr);
-#endif
-#ifdef PF_LLSC
-	tcg_gen_pf_llsc_add(addr, cpu_exclusive_node);
+
+#ifdef _HTM
+    gen_helper_xbegin(cpu_env);
 #endif
 
     if (size == 3) {
@@ -7577,8 +7563,6 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     TCGLabel *fail_label;
     TCGMemOp opc = size | MO_ALIGN | s->be_data;
 
-
-
     /* if (env->exclusive_addr == addr && env->exclusive_val == [addr]) {
          [addr] = {Rt};
          {Rd} = 0;
@@ -7591,6 +7575,13 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_gen_extu_i32_i64(extaddr, addr);
     tcg_gen_brcond_i64(TCG_COND_NE, extaddr, cpu_exclusive_addr, fail_label);
     tcg_temp_free_i64(extaddr);
+
+#ifdef _HTM
+	TCGv_i32 tmp = tcg_temp_new_i32();
+    /* strex without a prior ldrex should just fail */
+    gen_helper_x_ok(tmp);
+    tcg_gen_brcondi_i32(TCG_COND_EQ, tmp, 0, fail_label);
+#endif
 
     taddr = gen_aa32_addr(s, addr, opc);
     t0 = tcg_temp_new_i32();
@@ -7630,16 +7621,18 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     } else {
         t2 = tcg_temp_new_i32();
         tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
-	
-		// Insert helper to handle sc succeed condition through exclusive monitor.
-        tcg_gen_x_monitor_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
-        //tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
+        tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
         tcg_gen_setcond_i32(TCG_COND_NE, t0, t0, t2);
         tcg_temp_free_i32(t2);
     }
     tcg_temp_free_i32(t1);
     tcg_temp_free(taddr);
+#ifdef _HTM
+	tcg_gen_movi_i32(cpu_R[rd], 0);
+    gen_helper_xend();
+#else
     tcg_gen_mov_i32(cpu_R[rd], t0);
+#endif
     tcg_temp_free_i32(t0);
     tcg_gen_br(done_label);
 

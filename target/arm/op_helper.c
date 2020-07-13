@@ -19,6 +19,7 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "qemu/log.h"
+#include "qemu/htm.h"
 #include "qemu/main-loop.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
@@ -1089,3 +1090,34 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 	return ret;
 
 }
+
+void HELPER(xbegin)(CPUARMState *env)
+{
+    int status;
+    int retries = 100;
+
+ retry:
+    status = htm_begin();
+    if (unlikely(status != HTM_OK)) {
+        if ((status & HTM_ABORT_RETRY) && retries) {
+            retries--;
+            goto retry;
+        }
+        stop_the_world_lock(env_cpu(env));
+    }
+}
+
+void HELPER(xend)(void)
+{
+    if (likely(htm_test())) {
+        htm_end();
+    } else {
+        stop_the_world_unlock();
+    }
+}
+
+uint32_t HELPER(x_ok)(void)
+{
+    return likely(htm_test()) || stw_held;
+}
+
