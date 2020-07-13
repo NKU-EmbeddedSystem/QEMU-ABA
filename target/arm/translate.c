@@ -39,6 +39,7 @@
 
 //#define HASH_LLSC
 #define PF_LLSC
+#define _HTM
 //#define PICO_ST_LLSC
 //#define GEN_SC_EXCP			/* gen EXCEPTION on STREX */
 //#define GEN_LL_EXCP		/* gen EXCEPTION on LDREX */
@@ -7619,11 +7620,15 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
 
         tcg_temp_free_i64(o64);
     } else {
+#ifdef _HTM
+        tcg_gen_qemu_st_i32(t1, taddr, get_mem_index(s), opc);
+#else
         t2 = tcg_temp_new_i32();
         tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
         tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
         tcg_gen_setcond_i32(TCG_COND_NE, t0, t0, t2);
         tcg_temp_free_i32(t2);
+#endif
     }
     tcg_temp_free_i32(t1);
     tcg_temp_free(taddr);
