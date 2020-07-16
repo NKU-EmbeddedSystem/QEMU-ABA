@@ -1034,12 +1034,12 @@ extern int target_mprotect(abi_ulong, abi_ulong, int);
 void HELPER(pf_llsc_add)(CPUARMState *env, uint32_t addr, uint64_t node_addr)
 {
 	//FIXME: are we really don't need the lock?
-	//pthread_mutex_lock(&g_sc_lock);
+	pthread_mutex_lock(&g_sc_lock);
 	target_ulong page_addr = addr & 0xfffff000;
-    //fprintf(stderr, "[pf_llsc_add]\ttid %d, addr = %x, node_addr = %lx\n", env->exclusive_tid, page_addr, node_addr);
+    fprintf(stderr, "[pf_llsc_add]\ttid %d, addr = %x, node_addr = %lx\n", env->exclusive_tid, page_addr, node_addr);
 	x_monitor_set_exclusive_addr((void*)node_addr, addr);
 	target_mprotect(page_addr, 0x1000, PROT_READ);
-	//pthread_mutex_unlock(&g_sc_lock);
+	pthread_mutex_unlock(&g_sc_lock);
 }
 
 
@@ -1058,12 +1058,12 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 	uint32_t *haddr = (uint32_t*)g2h(addr);
 	uint32_t curv = *haddr;
 
+	pthread_mutex_lock(&g_sc_lock);
 	//TODO: mov curv comparing to IR
 	if (curv != cmpv) {
 		return curv;
 	}
 
-	pthread_mutex_lock(&g_sc_lock);
 	//TODO: use an already mapped one
 	void *pold, *pnew;
 	pold = (void*)TO_PAGE((uint64_t)haddr);
@@ -1073,7 +1073,7 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 		exit(2);
 	}
 	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
-		//fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
+		fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
 
 		if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
 			perror("[x_monitor_sc]\tmremap");
@@ -1091,7 +1091,7 @@ uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv
 	}
 
 	pthread_mutex_unlock(&g_sc_lock);
-	//fprintf(stderr, "[x_monitor_sc]\tcmpxchged!!!!!!!!!!!! thread %d strex! retv %x, %s\n", env->exclusive_tid, ret, (ret == curv) ? "suc" : "fail" );
+	fprintf(stderr, "[x_monitor_sc]\tcmpxchged!!!!!!!!!!!! thread %d strex! retv %x, %s\n", env->exclusive_tid, ret, (ret == curv) ? "suc" : "fail" );
 	return ret;
 
 }

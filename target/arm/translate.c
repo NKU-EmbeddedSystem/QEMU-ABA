@@ -7632,8 +7632,11 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
         tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
 	
 		// Insert helper to handle sc succeed condition through exclusive monitor.
+#ifdef PF_LLSC
         tcg_gen_x_monitor_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
-        //tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
+#else
+        tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
+#endif
         tcg_gen_setcond_i32(TCG_COND_NE, t0, t0, t2);
         tcg_temp_free_i32(t2);
     }

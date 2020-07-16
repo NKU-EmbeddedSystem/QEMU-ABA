@@ -661,7 +661,7 @@ static int pf_llsc_segfault_handler(int host_signum, siginfo_t *pinfo, void *puc
     unsigned long host_addr = (unsigned long)info->si_addr;
     unsigned long  guest_addr = h2g(host_addr);
 		CPUArchState *env = thread_cpu->env_ptr;
-		//fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr,  ((CPUARMState*)env)->regs[15]);
+		fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr,  ((CPUARMState*)env)->regs[15]);
 	pthread_mutex_lock(&g_sc_lock);
 	target_ulong page_addr = guest_addr & 0xfffff000;
     int is_write = ((uc->uc_mcontext.gregs[REG_ERR] & 0x2) != 0);
