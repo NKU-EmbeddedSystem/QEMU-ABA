@@ -48,10 +48,7 @@ static inline bool excp_is_internal(int excp)
         || excp == EXCP_HALTED
         || excp == EXCP_EXCEPTION_EXIT
         || excp == EXCP_KERNEL_TRAP
-        || excp == EXCP_SEMIHOST
-		|| excp == EXCP_STREX
-		|| excp == EXCP_LDREX;
-
+        || excp == EXCP_SEMIHOST;
 }
 
 /* Scale factor for generic timers, ie number of ns per tick.
@@ -951,6 +948,15 @@ void arm_cpu_update_virq(ARMCPU *cpu);
  * Must be called with the iothread lock held.
  */
 void arm_cpu_update_vfiq(ARMCPU *cpu);
+
+/**
+ * arm_mmu_idx_el:
+ * @env: The cpu environment
+ * @el: The EL to use.
+ *
+ * Return the full ARMMMUIdx for the translation regime for EL.
+ */
+ARMMMUIdx arm_mmu_idx_el(CPUARMState *env, int el);
 
 /**
  * arm_mmu_idx:

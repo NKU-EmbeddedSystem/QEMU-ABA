@@ -149,4 +149,6 @@ DECLARE_PLATFORM(habanero) = {
 	.resource_loaded	= flash_resource_loaded,
 	.exit			= ipmi_wdt_final_reset,
 	.terminate		= ipmi_terminate,
+	.seeprom_update		= astbmc_seeprom_update,
+	.op_display		= op_display_lpc,
 };

@@ -181,20 +181,14 @@ pc_kbd_close(void)
 static void
 pc_kbd_open(unsigned long *address)
 {
-    int len;
-    phandle_t ph;
-    unsigned long *prop;
-
-    fword("my-self");
-    fword("ihandle>phandle");
-    ph = (phandle_t)POP();
-    prop = (unsigned long *)get_property(ph, "address", &len);
-    *address = *prop;
+    PUSH(find_ih_method("address", my_self()));
+    fword("execute");
+    *address = POP();
 
     RET ( -1 );
 }
 
-DECLARE_UNNAMED_NODE(pc_kbd, INSTALL_OPEN, sizeof(unsigned long));
+DECLARE_UNNAMED_NODE(pc_kbd, 0, sizeof(unsigned long));
 
 NODE_METHODS(pc_kbd) = {
     { "open",               pc_kbd_open              },
@@ -208,9 +202,6 @@ ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
 {
     phandle_t chosen, aliases;
     char nodebuff[128];
-    
-    push_str(path);
-    fword("find-device");
 
     fword("new-device");
     
@@ -219,7 +210,10 @@ ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
 
     push_str("8042");
     fword("device-name");
-    
+
+    /* Make openable */
+    fword("is-open");
+
     PUSH((base + offset) >> 32);
     fword("encode-int");
     PUSH((base + offset) & 0xffffffff);
@@ -259,15 +253,9 @@ ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
 
     push_str("interrupts");
     fword("property");
-    
-    fword("finish-device");
-    
-    /* Keyboard */
-    snprintf(nodebuff, sizeof(nodebuff), "%s/8042/%s", path, kdev_name);
-    REGISTER_NAMED_NODE(pc_kbd, nodebuff);
 
-    push_str(nodebuff);
-    fword("find-device");
+    /* Keyboard */
+    fword("new-device");
 
     push_str(kdev_name);
     fword("device-name");
@@ -289,7 +277,15 @@ ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
     fword("encode-int");
     push_str("address");
     fword("property");
- 
+
+    BIND_NODE_METHODS(get_cur_dev(), pc_kbd);
+
+    PUSH(offset);
+    feval("value address");
+
+    fword("finish-device");
+
+    snprintf(nodebuff, sizeof(nodebuff), "%s/8042/%s", path, kdev_name);
     chosen = find_dev("/chosen");
     push_str(nodebuff);
     fword("open-dev");
@@ -302,10 +298,6 @@ ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
 
     /* Mouse (optional) */
     if (mdev_name != NULL) {
-        snprintf(nodebuff, sizeof(nodebuff), "%s/8042", path);
-        push_str(nodebuff);
-        fword("find-device");
-
         fword("new-device");
 
         push_str(mdev_name);
@@ -331,4 +323,6 @@ ob_pc_kbd_init(const char *path, const char *kdev_name, const char *mdev_name,
 
         fword("finish-device");
     }
+
+    fword("finish-device");
 }

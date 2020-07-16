@@ -46,9 +46,24 @@
 					  dev->npu->chip_id, dev->brick_index, ## a)
 
 
-/* Number of PEs supported */
-#define NPU2_MAX_PE_NUM		16
-#define NPU2_RESERVED_PE_NUM	15
+/*
+ * Number of PEs supported
+ *
+ * The NPU supports PE numbers from 0-15. At present, we only assign a maximum
+ * of 1 PE per brick.
+ *
+ * NVLink devices are currently exposed to Linux underneath a single virtual
+ * PHB. Therefore, we give NVLink half the available PEs, which is enough for
+ * 6 bricks plus 1 reserved PE.
+ *
+ * For OpenCAPI, the BDF-to-PE registers are used exclusively for mapping
+ * bricks to System Interrupt Log registers (the BDF component of those
+ * registers is ignored). Currently, we allocate a fixed PE based on the brick
+ * index in the upper half of the PE namespace.
+ */
+#define NPU2_MAX_PE_NUM		8
+#define NPU2_RESERVED_PE_NUM	7
+#define NPU2_OCAPI_PE(ndev) ((ndev)->brick_index + NPU2_MAX_PE_NUM)
 
 #define NPU2_LINKS_PER_CHIP 6
 
@@ -142,6 +157,7 @@ struct npu2_dev {
 
 	/* OpenCAPI */
 	struct phb		phb_ocapi;
+	uint64_t		linux_pe;
 	bool			train_need_fence;
 	bool			train_fenced;
 };
@@ -155,7 +171,6 @@ struct npu2 {
 	uint64_t	mm_base;
 	uint64_t	mm_size;
 	uint32_t	base_lsi;
-	uint32_t	irq_base;
 	uint32_t	total_devices;
 	struct npu2_dev	*devices;
 	enum phys_map_type gpu_map_type;
@@ -165,15 +180,26 @@ struct npu2 {
 	uint64_t	tve_cache[16];
 	bool		tx_zcal_complete[2];
 
-	/* Used to protect global MMIO space, in particular the XTS
-	 * tables. */
+	/*
+	 * Used to protect global MMIO space, in particular the XTS
+	 * tables, and LPC allocation
+	 */
 	struct lock	lock;
 
 	/* NVLink */
 	struct phb	phb_nvlink;
 	uint32_t	phb_index;
 
+	/* OCAPI */
 	uint64_t	i2c_port_id_ocapi;
+	struct lock	i2c_lock;
+	uint8_t		i2c_pin_mode;
+	uint8_t		i2c_pin_wr_state;
+	/*
+	 * Which device currently has an LPC allocation.
+	 * Temporary as long as we only support 1 LPC alloc per chip.
+	 */
+	struct npu2_dev	*lpc_mem_allocated;
 };
 
 static inline struct npu2 *phb_to_npu2_nvlink(struct phb *phb)
@@ -220,7 +246,8 @@ void npu2_set_link_flag(struct npu2_dev *ndev, uint8_t flag);
 void npu2_clear_link_flag(struct npu2_dev *ndev, uint8_t flag);
 uint32_t reset_ntl(struct npu2_dev *ndev);
 extern int nv_zcal_nominal;
-void npu2_opencapi_phy_setup(struct npu2_dev *dev);
+void npu2_opencapi_phy_init(struct npu2_dev *dev);
+void npu2_opencapi_phy_reset(struct npu2_dev *dev);
 void npu2_opencapi_phy_prbs31(struct npu2_dev *dev);
 void npu2_opencapi_bump_ui_lane(struct npu2_dev *dev);
 int64_t npu2_freeze_status(struct phb *phb __unused,
@@ -228,4 +255,5 @@ int64_t npu2_freeze_status(struct phb *phb __unused,
 			   uint8_t *freeze_state,
 			   uint16_t *pci_error_type __unused,
 			   uint16_t *severity __unused);
+void npu2_dump_scoms(int chip_id);
 #endif /* __NPU2_H */

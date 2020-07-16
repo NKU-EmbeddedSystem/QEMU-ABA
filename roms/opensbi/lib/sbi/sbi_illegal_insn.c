@@ -36,9 +36,22 @@ static int system_opcode_insn(ulong insn, u32 hartid, ulong mcause,
 	int csr_num   = (u32)insn >> 20;
 	ulong csr_val, new_csr_val;
 
-	if (sbi_emulate_csr_read(csr_num, hartid, regs->mstatus, scratch,
-				 &csr_val))
-		return truly_illegal_insn(insn, hartid, mcause, regs, scratch);
+	/*
+	 * WFI always traps as illegal instruction when executed from
+	 * VS/VU mode so we just forward it to HS-mode.
+	 */
+#if __riscv_xlen == 32
+	if ((regs->mstatusH & MSTATUSH_MPV) &&
+#else
+	if ((regs->mstatus & MSTATUS_MPV) &&
+#endif
+	    (insn & INSN_MASK_WFI) == INSN_MATCH_WFI)
+		return sbi_trap_redirect(regs, scratch,
+					 regs->mepc, mcause, insn);
+
+	if (sbi_emulate_csr_read(csr_num, hartid, regs, scratch, &csr_val))
+		return truly_illegal_insn(insn, hartid, mcause,
+					  regs, scratch);
 
 	do_write = rs1_num;
 	switch (GET_RM(insn)) {
@@ -66,7 +79,7 @@ static int system_opcode_insn(ulong insn, u32 hartid, ulong mcause,
 		return truly_illegal_insn(insn, hartid, mcause, regs, scratch);
 	};
 
-	if (do_write && sbi_emulate_csr_write(csr_num, hartid, regs->mstatus,
+	if (do_write && sbi_emulate_csr_write(csr_num, hartid, regs,
 					      scratch, new_csr_val))
 		return truly_illegal_insn(insn, hartid, mcause, regs, scratch);
 
@@ -116,11 +129,21 @@ int sbi_illegal_insn_handler(u32 hartid, ulong mcause,
 			     struct sbi_trap_regs *regs,
 			     struct sbi_scratch *scratch)
 {
-	ulong insn = csr_read(mbadaddr);
+	ulong insn = csr_read(CSR_MTVAL);
+#if __riscv_xlen == 32
+	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? TRUE : FALSE;
+#else
+	bool virt = (regs->mstatus & MSTATUS_MPV) ? TRUE : FALSE;
+#endif
+	struct unpriv_trap uptrap;
 
 	if (unlikely((insn & 3) != 3)) {
-		if (insn == 0)
-			insn = get_insn(regs->mepc, NULL);
+		if (insn == 0) {
+			insn = get_insn(regs->mepc, virt, scratch, &uptrap);
+			if (uptrap.cause)
+				return sbi_trap_redirect(regs, scratch,
+					regs->mepc, uptrap.cause, uptrap.tval);
+		}
 		if ((insn & 3) != 3)
 			return truly_illegal_insn(insn, hartid, mcause, regs,
 						  scratch);

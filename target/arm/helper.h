@@ -6,7 +6,6 @@ DEF_HELPER_3(add_saturate, i32, env, i32, i32)
 DEF_HELPER_3(sub_saturate, i32, env, i32, i32)
 DEF_HELPER_3(add_usaturate, i32, env, i32, i32)
 DEF_HELPER_3(sub_usaturate, i32, env, i32, i32)
-DEF_HELPER_2(double_saturate, i32, env, s32)
 DEF_HELPER_FLAGS_2(sdiv, TCG_CALL_NO_RWG_SE, s32, s32, s32)
 DEF_HELPER_FLAGS_2(udiv, TCG_CALL_NO_RWG_SE, i32, i32, i32)
 DEF_HELPER_FLAGS_1(rbit, TCG_CALL_NO_RWG_SE, i32, i32)
@@ -90,6 +89,10 @@ DEF_HELPER_4(msr_banked, void, env, i32, i32, i32)
 
 DEF_HELPER_2(get_user_reg, i32, env, i32)
 DEF_HELPER_3(set_user_reg, void, env, i32, i32)
+
+DEF_HELPER_FLAGS_2(rebuild_hflags_m32, TCG_CALL_NO_RWG, void, env, int)
+DEF_HELPER_FLAGS_2(rebuild_hflags_a32, TCG_CALL_NO_RWG, void, env, int)
+DEF_HELPER_FLAGS_2(rebuild_hflags_a64, TCG_CALL_NO_RWG, void, env, int)
 
 DEF_HELPER_1(vfp_get_fpscr, i32, env)
 DEF_HELPER_2(vfp_set_fpscr, void, env, i32)
@@ -690,16 +693,10 @@ DEF_HELPER_FLAGS_2(frint32_s, TCG_CALL_NO_RWG, f32, f32, ptr)
 DEF_HELPER_FLAGS_2(frint64_s, TCG_CALL_NO_RWG, f32, f32, ptr)
 DEF_HELPER_FLAGS_2(frint32_d, TCG_CALL_NO_RWG, f64, f64, ptr)
 DEF_HELPER_FLAGS_2(frint64_d, TCG_CALL_NO_RWG, f64, f64, ptr)
-DEF_HELPER_1(offload_load_exclusive_count, void, i32)
-DEF_HELPER_1(offload_store_exclusive_count, void, i32)
-DEF_HELPER_1(print_aa32_addr, void, i32)
-DEF_HELPER_3(pf_llsc_add, void, env, i32, i64)
-DEF_HELPER_FLAGS_4(x_monitor_sc, TCG_CALL_NO_WG, i32, env, tl, i32, i32)
 
-DEF_HELPER_2(xbegin, void, env, i32)
+DEF_HELPER_1(xbegin, void, env)
 DEF_HELPER_0(x_ok, i32)
-DEF_HELPER_1(xend, void, env)
-//DEF_HELPER_FLAGS_4(atomic_cmpxchgb, TCG_CALL_NO_WG, i32, env, tl, i32, i32)
+DEF_HELPER_0(xend, void)
 
 #ifdef TARGET_AARCH64
 #include "helper-a64.h"

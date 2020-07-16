@@ -31,7 +31,7 @@ using powernv_defconfig.
 If you use op-build to build a full set of OpenPower images, you’ll
 likely be able to extract skiboot, zImage.epapr (or vmlinux and
 rootfs.cpio.xz) from output/images. We suggest using the
-openpower_mambo_defconfig.
+opal_defconfig.
 
 ### Setup environment variables
 Setup environment variables to point to your images
@@ -39,6 +39,11 @@ Setup environment variables to point to your images
 export SKIBOOT_ZIMAGE=$HOME/src/op-build/output/images/zImage.epapr
 export SKIBOOT=$HOME/src/op-build/output/images/skiboot.lid
 export SKIBOOT_AUTORUN=1
+```
+If you want Mambo to autmatically run *AND* exit when the system is
+shutdown (or has a HW crash) use this:
+```
+export SKIBOOT_AUTORUN=2
 ```
 If you want a vmlinux and separate initramfs you can also do this:
 ```

@@ -12,41 +12,34 @@
 
 /* clang-format off */
 
-#define SBI_ECALL_SET_TIMER			0
-#define SBI_ECALL_CONSOLE_PUTCHAR		1
-#define SBI_ECALL_CONSOLE_GETCHAR		2
-#define SBI_ECALL_CLEAR_IPI			3
-#define SBI_ECALL_SEND_IPI			4
-#define SBI_ECALL_REMOTE_FENCE_I		5
-#define SBI_ECALL_REMOTE_SFENCE_VMA		6
-#define SBI_ECALL_REMOTE_SFENCE_VMA_ASID	7
-#define SBI_ECALL_SHUTDOWN			8
+enum sbi_ext_id {
+	SBI_EXT_0_1_SET_TIMER = 0x0,
+	SBI_EXT_0_1_CONSOLE_PUTCHAR = 0x1,
+	SBI_EXT_0_1_CONSOLE_GETCHAR = 0x2,
+	SBI_EXT_0_1_CLEAR_IPI = 0x3,
+	SBI_EXT_0_1_SEND_IPI = 0x4,
+	SBI_EXT_0_1_REMOTE_FENCE_I = 0x5,
+	SBI_EXT_0_1_REMOTE_SFENCE_VMA = 0x6,
+	SBI_EXT_0_1_REMOTE_SFENCE_VMA_ASID = 0x7,
+	SBI_EXT_0_1_SHUTDOWN = 0x8,
+	SBI_EXT_BASE = 0x10,
+};
 
+enum sbi_ext_base_fid {
+	SBI_EXT_BASE_GET_SPEC_VERSION = 0,
+	SBI_EXT_BASE_GET_IMP_ID,
+	SBI_EXT_BASE_GET_IMP_VERSION,
+	SBI_EXT_BASE_PROBE_EXT,
+	SBI_EXT_BASE_GET_MVENDORID,
+	SBI_EXT_BASE_GET_MARCHID,
+	SBI_EXT_BASE_GET_MIMPID,
+};
+
+#define SBI_SPEC_VERSION_MAJOR_OFFSET	24
+#define SBI_SPEC_VERSION_MAJOR_MASK	0x7f
+#define SBI_SPEC_VERSION_MINOR_MASK	0xffffff
+#define SBI_EXT_VENDOR_START		0x09000000
+#define SBI_EXT_VENDOR_END		0x09FFFFFF
 /* clang-format on */
-
-#define SBI_ECALL(__num, __a0, __a1, __a2)                                    \
-	({                                                                    \
-		register unsigned long a0 asm("a0") = (unsigned long)(__a0);  \
-		register unsigned long a1 asm("a1") = (unsigned long)(__a1);  \
-		register unsigned long a2 asm("a2") = (unsigned long)(__a2);  \
-		register unsigned long a7 asm("a7") = (unsigned long)(__num); \
-		asm volatile("ecall"                                          \
-			     : "+r"(a0)                                       \
-			     : "r"(a1), "r"(a2), "r"(a7)                      \
-			     : "memory");                                     \
-		a0;                                                           \
-	})
-
-#define SBI_ECALL_0(__num) SBI_ECALL(__num, 0, 0, 0)
-#define SBI_ECALL_1(__num, __a0) SBI_ECALL(__num, __a0, 0, 0)
-#define SBI_ECALL_2(__num, __a0, __a1) SBI_ECALL(__num, __a0, __a1, 0)
-
-#define sbi_ecall_console_putc(c) SBI_ECALL_1(SBI_ECALL_CONSOLE_PUTCHAR, (c));
-
-static inline void sbi_ecall_console_puts(const char *str)
-{
-	while (str && *str)
-		sbi_ecall_console_putc(*str++);
-}
 
 #endif

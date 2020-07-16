@@ -26,7 +26,9 @@
 extern void __gcov_dump(void);
 #endif
 
-extern long long llsc_single, llsc_multi;
+extern int pf_counter;
+extern int ll_count, abort_count;
+
 void preexit_cleanup(CPUArchState *env, int code)
 {
 #ifdef TARGET_GPROF
@@ -35,6 +37,8 @@ void preexit_cleanup(CPUArchState *env, int code)
 #ifdef CONFIG_GCOV
         __gcov_dump();
 #endif
-		fprintf(stderr, "[x_mon]\tllsc_single=%lld, llsc_multi=%lld\n", llsc_single, llsc_multi);
+		fprintf(stderr, "pf_counter : %d\n", pf_counter);
+		fprintf(stderr, "abort count : %d\tll_count : %d\n", abort_count, ll_count);
         gdb_exit(env, code);
+        qemu_plugin_atexit_cb();
 }

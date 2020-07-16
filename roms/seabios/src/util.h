@@ -12,7 +12,7 @@ void handle_1553(struct bregs *regs);
 // bmp.c
 struct bmp_decdata *bmp_alloc(void);
 int bmp_decode(struct bmp_decdata *bmp, unsigned char *data, int data_size);
-void bmp_get_size(struct bmp_decdata *bmp, int *width, int *height);
+void bmp_get_info(struct bmp_decdata *bmp, int *width, int *height, int *bpp);
 int bmp_show(struct bmp_decdata *bmp, unsigned char *pic, int width
              , int height, int depth, int bytes_per_line_dest);
 
@@ -36,7 +36,14 @@ int bootprio_find_pci_rom(struct pci_device *pci, int instance);
 int bootprio_find_named_rom(const char *name, int instance);
 struct usbdevice_s;
 int bootprio_find_usb(struct usbdevice_s *usbdev, int lun);
+int get_keystroke_full(int msec);
 int get_keystroke(int msec);
+struct chs_s;
+int boot_lchs_find_pci_device(struct pci_device *pci, struct chs_s *chs);
+int boot_lchs_find_scsi_device(struct pci_device *pci, int target, int lun,
+                               struct chs_s *chs);
+int boot_lchs_find_ata_device(struct pci_device *pci, int chanid, int slave,
+                              struct chs_s *chs);
 
 // bootsplash.c
 void enable_vga_console(void);

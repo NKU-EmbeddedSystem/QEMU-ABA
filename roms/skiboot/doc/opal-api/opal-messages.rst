@@ -11,7 +11,7 @@ An opal_msg is: ::
 
   struct opal_msg {
 	__be32 msg_type;
-	__be32 reserved;
+	__be32 size;
 	__be64 params[8];
   };
 
@@ -21,8 +21,9 @@ define all eight parameters, the value in the undefined parameters is
 undefined, although can safely be memcpy()d or otherwise moved.
 
 In the device tree, there's an opal-msg-size property of the OPAL node that
-says the size of a struct opal-msg. In the future, OPAL may support larger
-messages. See ``OPAL_GET_MESSAGE`` documentation for details.
+says the size of a struct opal-msg. Kernel will use this property to allocate
+memory for opal_msg structure. See ``OPAL_GET_MESSAGE`` documentation for
+details.
 ::
 
   ibm,opal {
@@ -42,13 +43,15 @@ Additional parameters are function-specific.
 OPAL_MSG_MEM_ERR
 ----------------
 
+.. _OPAL_MSG_EPOW:
+
 OPAL_MSG_EPOW
 -------------
 
 Used by OPAL to issue environmental and power warnings to host OS for
 conditions requiring an earlier poweroff. A few examples of these are high
 ambient temperature or system running on UPS power with low UPS battery.
-Host OS can query OPAL via ``GET_EPOW_STATUS`` API to obtain information about
+Host OS can query OPAL via :ref:`OPAL_GET_EPOW_STATUS` API to obtain information about
 EPOW conditions present. Refer include/opal-api.h for description of
 all supported EPOW events. OPAL_SYSPOWER_CHNG, OPAL_SYSPOWER_FAIL and
 OPAL_SYSPOWER_INC events don't require system poweroff.
@@ -64,6 +67,8 @@ the first parameter to indicate weather the system is going down for shutdown
 or a reboot. ::
 
   params[0] = 0x01 reboot, 0x00 shutdown
+
+.. _OPAL_MSG_HMI_EVT:
 
 OPAL_MSG_HMI_EVT
 ----------------
@@ -123,6 +128,7 @@ Notes:
 	} u;
    };
 
+.. _OPAL_MSG_DPO:
 
 OPAL_MSG_DPO
 ------------
@@ -131,6 +137,8 @@ Delayed poweroff where OPAL informs host OS that a poweroff has been
 requested and a forced shutdown will happen in future. Host OS can use
 OPAL_GET_DPO_STATUS API to query OPAL the number of seconds remaining
 before a forced poweroff will occur.
+
+.. _OPAL_MSG_PRD:
 
 OPAL_MSG_PRD
 ------------
@@ -175,7 +183,7 @@ struct opal_prd_msg: ::
 	};
 
 Responses from the kernel use the same message format, but are passed
-through the opal_prd_msg call.
+through the :ref:`OPAL_PRD_MSG` call.
 
 OPAL_MSG_OCC
 ------------
@@ -219,3 +227,9 @@ these values.
 If ``opal_occ_msg.type > 2`` then host should ignore the message for now,
 new events can be defined for ``opal_occ_msg.type`` in the future versions
 of OPAL.
+
+OPAL_MSG_PRD2
+-------------
+
+This message is a OPAL-to-HBRT notification. Its same as OPAL_MSG_PRD except
+this one supports passing more than 64bytes (8*8) of data.

@@ -20,7 +20,7 @@ void sbi_fifo_init(struct sbi_fifo *fifo, void *queue_mem, u16 entries,
 	fifo->entry_size  = entry_size;
 	SPIN_LOCK_INIT(&fifo->qlock);
 	fifo->avail = fifo->tail = 0;
-	sbi_memset(fifo->queue, 0, entries * entry_size);
+	sbi_memset(fifo->queue, 0, (size_t)entries * entry_size);
 }
 
 /* Note: must be called with fifo->qlock held */
@@ -55,6 +55,21 @@ bool sbi_fifo_is_full(struct sbi_fifo *fifo)
 }
 
 /* Note: must be called with fifo->qlock held */
+static inline void  __sbi_fifo_enqueue(struct sbi_fifo *fifo, void *data)
+{
+	u32 head;
+
+	head = (u32)fifo->tail + fifo->avail;
+	if (head >= fifo->num_entries)
+		head = head - fifo->num_entries;
+
+	sbi_memcpy(fifo->queue + head * fifo->entry_size, data, fifo->entry_size);
+
+	fifo->avail++;
+}
+
+
+/* Note: must be called with fifo->qlock held */
 static inline bool __sbi_fifo_is_empty(struct sbi_fifo *fifo)
 {
 	return (fifo->avail == 0) ? TRUE : FALSE;
@@ -74,9 +89,11 @@ bool sbi_fifo_is_empty(struct sbi_fifo *fifo)
 /* Note: must be called with fifo->qlock held */
 static inline void __sbi_fifo_reset(struct sbi_fifo *fifo)
 {
+	size_t size = (size_t)fifo->num_entries * fifo->entry_size;
+
 	fifo->avail = 0;
 	fifo->tail  = 0;
-	sbi_memset(fifo->queue, 0, fifo->num_entries * fifo->entry_size);
+	sbi_memset(fifo->queue, 0, size);
 }
 
 bool sbi_fifo_reset(struct sbi_fifo *fifo)
@@ -107,7 +124,9 @@ int sbi_fifo_inplace_update(struct sbi_fifo *fifo, void *in,
 
 	if (!fifo || !in)
 		return ret;
+
 	spin_lock(&fifo->qlock);
+
 	if (__sbi_fifo_is_empty(fifo)) {
 		spin_unlock(&fifo->qlock);
 		return ret;
@@ -118,11 +137,9 @@ int sbi_fifo_inplace_update(struct sbi_fifo *fifo, void *in,
 		if (index >= fifo->num_entries)
 			index = index - fifo->num_entries;
 		entry = (void *)fifo->queue + (u32)index * fifo->entry_size;
-		ret   = fptr(in, entry);
+		ret = fptr(in, entry);
+
 		if (ret == SBI_FIFO_SKIP || ret == SBI_FIFO_UPDATED) {
-			break;
-		} else if (ret == SBI_FIFO_RESET) {
-			__sbi_fifo_reset(fifo);
 			break;
 		}
 	}
@@ -133,8 +150,6 @@ int sbi_fifo_inplace_update(struct sbi_fifo *fifo, void *in,
 
 int sbi_fifo_enqueue(struct sbi_fifo *fifo, void *data)
 {
-	u32 head;
-
 	if (!fifo || !data)
 		return SBI_EINVAL;
 
@@ -144,14 +159,7 @@ int sbi_fifo_enqueue(struct sbi_fifo *fifo, void *data)
 		spin_unlock(&fifo->qlock);
 		return SBI_ENOSPC;
 	}
-
-	head = (u32)fifo->tail + fifo->avail;
-	if (head >= fifo->num_entries)
-		head = head - fifo->num_entries;
-
-	sbi_memcpy(fifo->queue + head * fifo->entry_size, data, fifo->entry_size);
-
-	fifo->avail++;
+	__sbi_fifo_enqueue(fifo, data);
 
 	spin_unlock(&fifo->qlock);
 

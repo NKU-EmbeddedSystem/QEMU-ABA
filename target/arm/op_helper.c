@@ -19,8 +19,8 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "qemu/log.h"
-#include "qemu/htm.h"
 #include "qemu/main-loop.h"
+#include "qemu/htm.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "internals.h"
@@ -60,6 +60,8 @@ void raise_exception(CPUARMState *env, uint32_t excp,
                      uint32_t syndrome, uint32_t target_el)
 {
     CPUState *cs = do_raise_exception(env, excp, syndrome, target_el);
+	if(unlikely(htm_test()))
+		htm_end();
     cpu_loop_exit(cs);
 }
 
@@ -132,21 +134,6 @@ uint32_t HELPER(sub_saturate)(CPUARMState *env, uint32_t a, uint32_t b)
     if (((res ^ a) & SIGNBIT) && ((a ^ b) & SIGNBIT)) {
         env->QF = 1;
         res = ~(((int32_t)a >> 31) ^ SIGNBIT);
-    }
-    return res;
-}
-
-uint32_t HELPER(double_saturate)(CPUARMState *env, int32_t val)
-{
-    uint32_t res;
-    if (val >= 0x40000000) {
-        res = ~SIGNBIT;
-        env->QF = 1;
-    } else if (val <= (int32_t)0xc0000000) {
-        res = SIGNBIT;
-        env->QF = 1;
-    } else {
-        res = val << 1;
     }
     return res;
 }
@@ -240,6 +227,7 @@ uint32_t HELPER(usat16)(CPUARMState *env, uint32_t x, uint32_t shift)
 void HELPER(setend)(CPUARMState *env)
 {
     env->uncached_cpsr ^= CPSR_E;
+    arm_rebuild_hflags(env);
 }
 
 /* Function checks whether WFx (WFI/WFE) instructions are set up to be trapped.
@@ -403,6 +391,8 @@ uint32_t HELPER(cpsr_read)(CPUARMState *env)
 void HELPER(cpsr_write)(CPUARMState *env, uint32_t val, uint32_t mask)
 {
     cpsr_write(env, val, mask, CPSRWriteByInstr);
+    /* TODO: Not all cpsr bits are relevant to hflags.  */
+    arm_rebuild_hflags(env);
 }
 
 /* Write the CPSR for a 32-bit exception return */
@@ -420,6 +410,7 @@ void HELPER(cpsr_write_eret)(CPUARMState *env, uint32_t val)
      * state. Do the masking now.
      */
     env->regs[15] &= (env->thumb ? ~1 : ~3);
+    arm_rebuild_hflags(env);
 
     qemu_mutex_lock_iothread();
     arm_call_el_change_hook(env_archcpu(env));
@@ -1004,97 +995,14 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
 #endif
 }
 
-extern int ldex_count;
-extern long long llsc_single;
-extern long long llsc_multi;
-extern int is_multi;
-void HELPER(offload_load_exclusive_count)(uint32_t addr)
-{
-	if (!is_multi)
-		__sync_fetch_and_add(&llsc_single, 1);
-	else
-		__sync_fetch_and_add(&llsc_multi, 1);
+int ll_count = 0;
+int abort_count = 0;
 
-    //fprintf(stderr, "helper_offload_load_exclusive\taddr %p, value %p\n", addr, *(int*)(g2h(addr)));
-}
-
-void HELPER(offload_store_exclusive_count)(uint32_t addr)
-{
-    //extern int stex_count;
-	//__sync_fetch_and_add(&stex_count, 1);
-}
-
-void HELPER(print_aa32_addr)(uint32_t addr)
-{
-    fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
-}
-
-extern pthread_mutex_t g_sc_lock;
-extern int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
-extern int target_mprotect(abi_ulong, abi_ulong, int);
-void HELPER(pf_llsc_add)(CPUARMState *env, uint32_t addr, uint64_t node_addr)
-{
-	pthread_mutex_lock(&g_sc_lock);
-	target_ulong page_addr = addr & 0xfffff000;
-    fprintf(stderr, "[pf_llsc_add]\ttid %d, addr = %x, node_addr = %lx\n", env->exclusive_tid, page_addr, node_addr);
-	x_monitor_set_exclusive_addr((void*)node_addr, addr);
-	target_mprotect(page_addr, 0x1000, PROT_READ);
-	pthread_mutex_unlock(&g_sc_lock);
-}
-
-
-extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
-extern int x_monitor_check_and_clean(int tid, uint32_t addr);
-#define TO_PAGE(x) (x >> 12 << 12)
-#define PAGE_SIZE 0x1000
-// Handle sc succeed condition through exclusive monitor.
-uint32_t HELPER(x_monitor_sc)(CPUARMState *env, target_ulong addr, uint32_t cmpv, uint32_t newv)
-{
-	fprintf(stderr, "[x_monitor_sc]\ttid %d, hello! addr %x, cmpv %x, newv %x\n", 
-					env->exclusive_tid, addr, cmpv, newv);
-
-	uint32_t *haddr = (uint32_t*)g2h(addr);
-	uint32_t curv = *haddr;
-
-	//TODO: mov curv comparing to IR
-	if (curv != cmpv) {
-		return curv;
-	}
-
-	pthread_mutex_lock(&g_sc_lock);
-    if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
-		fprintf(stderr, "[x_monitor_sc]\tthread %d strex fail! curval %x, cmpv %x, exclusive mark lost.\n", env->exclusive_tid, curv, cmpv);
-
-		pthread_mutex_unlock(&g_sc_lock);
-		return cmpv+1;
-	}
-	x_monitor_check_and_clean(env->exclusive_tid, addr);
-	//TODO: use an already mapped one
-	void *pold, *pnew;
-	pold = (void*)TO_PAGE((uint64_t)haddr);
-	pnew = mmap(0, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	if (((long)mremap(pold, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pnew)) == -1) {
-		perror("[x_monitor_sc]\tmremap");
-		exit(2);
-	}
-	
-	mprotect(pnew, PAGE_SIZE, PROT_READ | PROT_WRITE);
-	uint32_t ret = __sync_val_compare_and_swap(haddr - (uint32_t*)pold + (uint32_t*)pnew, cmpv, newv);
-	if (((long)mremap(pnew, PAGE_SIZE, PAGE_SIZE, MREMAP_FIXED | MREMAP_MAYMOVE, pold)) == -1) {
-		perror("[x_monitor_sc]\tmremap");
-		exit(2);
-	}
-
-	pthread_mutex_unlock(&g_sc_lock);
-	fprintf(stderr, "[x_monitor_sc]\ttid:%d cmpxchged! retv %x\n", env->exclusive_tid, ret);
-	return ret;
-
-}
-
-void HELPER(xbegin)(CPUARMState *env, target_ulong addr)
+void HELPER(xbegin)(CPUARMState *env)
 {
     int status;
     int retries = 100;
+	__sync_fetch_and_add(&ll_count, 1);
 
  retry:
     status = htm_begin();
@@ -1103,27 +1011,22 @@ void HELPER(xbegin)(CPUARMState *env, target_ulong addr)
             retries--;
             goto retry;
         }
-        target_ulong page_addr = addr & 0xfffff000;
-        fprintf(stderr, "[pf_llsc_add]\ttid %d, addr = %x", env->exclusive_tid, addr);
-        x_monitor_set_exclusive_addr((void *)env->exclusive_node, addr);
-        target_mprotect(page_addr, 0x1000, PROT_READ);
         //stop_the_world_lock(env_cpu(env));
+		env->exclusive_addr = -1;
+		__sync_fetch_and_add(&abort_count, 1);
     }
 }
 
-void HELPER(xend)(CPUARMState *env)
+void HELPER(xend)(void)
 {
     if (likely(htm_test())) {
         htm_end();
     } else {
         //stop_the_world_unlock();
-        raise_exception(env, EXCP_STREX, syn_uncategorized(),
-                    exception_target_el(env));
     }
 }
 
 uint32_t HELPER(x_ok)(void)
 {
-    return likely(htm_test());
+    return likely(htm_test()) || stw_held;
 }
-

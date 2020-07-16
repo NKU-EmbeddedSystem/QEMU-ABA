@@ -209,8 +209,12 @@ static void firenze_init(void)
 
 DECLARE_PLATFORM(firenze) = {
 	.name			= "Firenze",
+	.psi			= &fsp_platform_psi,
+	.prd			= &fsp_platform_prd,
 	.probe			= firenze_probe,
 	.init			= firenze_init,
+	.fast_reboot_init	= fsp_console_reset,
+	.finalise_dt		= ibm_fsp_finalise_dt,
 	.exit			= ibm_fsp_exit,
 	.cec_power_down		= ibm_fsp_cec_power_down,
 	.cec_reboot		= ibm_fsp_cec_reboot,
@@ -226,4 +230,7 @@ DECLARE_PLATFORM(firenze) = {
 	.resource_loaded	= fsp_resource_loaded,
 	.sensor_read		= ibm_fsp_sensor_read,
 	.terminate		= ibm_fsp_terminate,
+	.op_display		= fsp_op_display,
+	.vpd_iohub_load		= vpd_iohub_load,
+	.heartbeat_time		= fsp_heartbeat_time,
 };

@@ -30,15 +30,21 @@
 #define SBI_PLATFORM_HART_STACK_SIZE_OFFSET (0x54)
 /** Offset of disabled_hart_mask in struct sbi_platform */
 #define SBI_PLATFORM_DISABLED_HART_OFFSET (0x58)
+/** Offset of tlb_range_flush_limit in struct sbi_platform */
+#define SBI_PLATFORM_TLB_RANGE_FLUSH_LIMIT_OFFSET (0x60)
 /** Offset of platform_ops_addr in struct sbi_platform */
-#define SBI_PLATFORM_OPS_OFFSET (0x60)
+#define SBI_PLATFORM_OPS_OFFSET (0x68)
 /** Offset of firmware_context in struct sbi_platform */
-#define SBI_PLATFORM_FIRMWARE_CONTEXT_OFFSET (0x60 + __SIZEOF_POINTER__)
+#define SBI_PLATFORM_FIRMWARE_CONTEXT_OFFSET (0x68 + __SIZEOF_POINTER__)
+
+#define SBI_PLATFORM_TLB_RANGE_FLUSH_LIMIT_DEFAULT		(1UL << 12)
 
 #ifndef __ASSEMBLY__
 
 #include <sbi/sbi_version.h>
 #include <sbi/sbi_scratch.h>
+#include <sbi/sbi_ecall.h>
+#include <sbi/sbi_error.h>
 
 /** Possible feature flags of a platform */
 enum sbi_platform_features {
@@ -90,8 +96,6 @@ struct sbi_platform_operations {
 
 	/** Send IPI to a target HART */
 	void (*ipi_send)(u32 target_hart);
-	/** Wait for target HART to acknowledge IPI */
-	void (*ipi_sync)(u32 target_hart);
 	/** Clear IPI for a target HART */
 	void (*ipi_clear)(u32 target_hart);
 	/** Initialize IPI for current HART */
@@ -110,6 +114,14 @@ struct sbi_platform_operations {
 	int (*system_reboot)(u32 type);
 	/** Shutdown or poweroff the platform */
 	int (*system_shutdown)(u32 type);
+
+	/** platform specific SBI extension implementation probe function */
+	int (*vendor_ext_check)(long extid);
+	/** platform specific SBI extension implementation provider */
+	int (*vendor_ext_provider)(long extid, long funcid,
+			unsigned long *args, unsigned long *out_value,
+			unsigned long *out_trap_cause,
+			unsigned long *out_trap_val);
 } __packed;
 
 /** Representation of a platform */
@@ -136,6 +148,8 @@ struct sbi_platform {
 	u32 hart_stack_size;
 	/** Mask representing the set of disabled HARTs */
 	u64 disabled_hart_mask;
+	/* Maximum value of tlb flush range request*/
+	u64 tlb_range_flush_limit;
 	/** Pointer to sbi platform operations */
 	unsigned long platform_ops_addr;
 	/** Pointer to system firmware specific context */
@@ -198,6 +212,22 @@ static inline bool sbi_platform_hart_disabled(const struct sbi_platform *plat,
 	if (plat && (plat->disabled_hart_mask & (1 << hartid)))
 		return TRUE;
 	return FALSE;
+}
+
+/**
+ * Get platform specific tlb range flush maximum value. Any request with size
+ * higher than this is upgraded to a full flush.
+ *
+ * @param plat pointer to struct sbi_platform
+ *
+ * @return tlb range flush limit value. Returns a default (page size) if not
+ * defined by platform.
+ */
+static inline u64 sbi_platform_tlbr_flush_limit(const struct sbi_platform *plat)
+{
+	if (plat && plat->tlb_range_flush_limit)
+		return plat->tlb_range_flush_limit;
+	return SBI_PLATFORM_TLB_RANGE_FLUSH_LIMIT_DEFAULT;
 }
 
 /**
@@ -371,19 +401,6 @@ static inline void sbi_platform_ipi_send(const struct sbi_platform *plat,
 }
 
 /**
- * Wait for target HART to acknowledge IPI
- *
- * @param plat pointer to struct sbi_platform
- * @param target_hart HART ID of IPI target
- */
-static inline void sbi_platform_ipi_sync(const struct sbi_platform *plat,
-					 u32 target_hart)
-{
-	if (plat && sbi_platform_ops(plat)->ipi_sync)
-		sbi_platform_ops(plat)->ipi_sync(target_hart);
-}
-
-/**
  * Clear IPI for a target HART
  *
  * @param plat pointer to struct sbi_platform
@@ -417,7 +434,7 @@ static inline int sbi_platform_ipi_init(const struct sbi_platform *plat,
  *
  * @param plat pointer to struct sbi_platform
  *
- * @return 64bit timer value
+ * @return 64-bit timer value
  */
 static inline u64 sbi_platform_timer_value(const struct sbi_platform *plat)
 {
@@ -497,6 +514,54 @@ static inline int sbi_platform_system_shutdown(const struct sbi_platform *plat,
 	if (plat && sbi_platform_ops(plat)->system_shutdown)
 		return sbi_platform_ops(plat)->system_shutdown(type);
 	return 0;
+}
+
+/**
+ * Check if a vendor extension is implemented or not.
+ *
+ * @param plat pointer to struct sbi_platform
+ * @param extid	vendor SBI extension id
+ *
+ * @return 0 if extid is not implemented and 1 if implemented
+ */
+static inline int sbi_platform_vendor_ext_check(const struct sbi_platform *plat,
+						long extid)
+{
+	if (plat && sbi_platform_ops(plat)->vendor_ext_check)
+		return sbi_platform_ops(plat)->vendor_ext_check(extid);
+
+	return 0;
+}
+
+/**
+ * Invoke platform specific vendor SBI extension implementation.
+ *
+ * @param plat pointer to struct sbi_platform
+ * @param extid	vendor SBI extension id
+ * @param funcid SBI function id within the extension id
+ * @param args pointer to arguments passed by the caller
+ * @param out_value output value that can be filled the callee
+ * @param out_tcause trap cause that can be filled the callee
+ * @param out_tvalue possible trap value that can be filled the callee
+ *
+ * @return 0 on success and negative error code on failure
+ */
+static inline int sbi_platform_vendor_ext_provider(const struct sbi_platform *plat,
+						   long extid, long funcid,
+						   unsigned long *args,
+						   unsigned long *out_value,
+						   unsigned long *out_tcause,
+						   unsigned long *out_tval)
+{
+	if (plat && sbi_platform_ops(plat)->vendor_ext_provider) {
+		return sbi_platform_ops(plat)->vendor_ext_provider(extid,
+								   funcid, args,
+								  out_value,
+								  out_tcause,
+								  out_tval);
+	}
+
+	return SBI_ENOTSUPP;
 }
 
 #endif

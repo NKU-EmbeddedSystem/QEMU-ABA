@@ -1,4 +1,4 @@
-/* Copyright 2013-2018 IBM Corp.
+/* Copyright 2013-2019 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,8 +70,8 @@
 #define OPAL_WRITE_NVRAM			8
 #define OPAL_HANDLE_INTERRUPT			9
 #define OPAL_POLL_EVENTS			10
-#define OPAL_PCI_SET_HUB_TCE_MEMORY		11
-#define OPAL_PCI_SET_PHB_TCE_MEMORY		12
+#define OPAL_PCI_SET_HUB_TCE_MEMORY		11 /* Removed, p5ioc only */
+#define OPAL_PCI_SET_PHB_TCE_MEMORY		12 /* Removed, p5ioc only */
 #define OPAL_PCI_CONFIG_READ_BYTE		13
 #define OPAL_PCI_CONFIG_READ_HALF_WORD  	14
 #define OPAL_PCI_CONFIG_READ_WORD		15
@@ -89,13 +89,13 @@
 #define OPAL_PCI_PHB_MMIO_ENABLE		27
 #define OPAL_PCI_SET_PHB_MEM_WINDOW		28
 #define OPAL_PCI_MAP_PE_MMIO_WINDOW		29
-#define OPAL_PCI_SET_PHB_TABLE_MEMORY		30
+#define OPAL_PCI_SET_PHB_TABLE_MEMORY		30 /* never implemented */
 #define OPAL_PCI_SET_PE				31
 #define OPAL_PCI_SET_PELTV			32
 #define OPAL_PCI_SET_MVE			33
 #define OPAL_PCI_SET_MVE_ENABLE			34
-#define OPAL_PCI_GET_XIVE_REISSUE		35
-#define OPAL_PCI_SET_XIVE_REISSUE		36
+#define OPAL_PCI_GET_XIVE_REISSUE		35 /* never implemented */
+#define OPAL_PCI_SET_XIVE_REISSUE		36 /* never implemented */
 #define OPAL_PCI_SET_XIVE_PE			37
 #define OPAL_GET_XIVE_SOURCE			38
 #define OPAL_GET_MSI_32				39
@@ -105,6 +105,9 @@
 #define OPAL_WRITE_OPPANEL			43 /* unimplemented */
 #define OPAL_PCI_MAP_PE_DMA_WINDOW		44
 #define OPAL_PCI_MAP_PE_DMA_WINDOW_REAL		45
+/* 46 is unused */
+/* 47 is unused */
+/* 48 is unused */
 #define OPAL_PCI_RESET				49
 #define OPAL_PCI_GET_HUB_DIAG_DATA		50
 #define OPAL_PCI_GET_PHB_DIAG_DATA		51
@@ -199,8 +202,8 @@
 #define OPAL_XIVE_FREE_IRQ			140
 #define OPAL_XIVE_SYNC				141
 #define OPAL_XIVE_DUMP				142
-#define OPAL_XIVE_RESERVED3			143
-#define OPAL_XIVE_RESERVED4			144
+#define OPAL_XIVE_GET_QUEUE_STATE		143 /* Get END state */
+#define OPAL_XIVE_SET_QUEUE_STATE		144 /* Set END state */
 #define OPAL_SIGNAL_SYSTEM_RESET		145
 #define OPAL_NPU_INIT_CONTEXT			146
 #define OPAL_NPU_DESTROY_CONTEXT		147
@@ -226,7 +229,10 @@
 #define OPAL_NX_COPROC_INIT			167
 #define OPAL_NPU_SET_RELAXED_ORDER		168
 #define OPAL_NPU_GET_RELAXED_ORDER		169
-#define OPAL_LAST				169
+#define OPAL_XIVE_GET_VP_STATE			170 /* Get NVT state */
+#define OPAL_NPU_MEM_ALLOC			171
+#define OPAL_NPU_MEM_RELEASE			172
+#define OPAL_LAST				172
 
 #define QUIESCE_HOLD			1 /* Spin all calls at entry */
 #define QUIESCE_REJECT			2 /* Fail all calls with OPAL_BUSY */
@@ -547,12 +553,13 @@ enum opal_msg_type {
 	OPAL_MSG_DPO		= 5,
 	OPAL_MSG_PRD		= 6,
 	OPAL_MSG_OCC		= 7,
+	OPAL_MSG_PRD2		= 8,
 	OPAL_MSG_TYPE_MAX,
 };
 
 struct opal_msg {
 	__be32 msg_type;
-	__be32 reserved;
+	__be32 size;
 	__be64 params[8];
 };
 
@@ -781,55 +788,6 @@ enum {
 	OPAL_HMI_FLAGS_NEW_EVENT	= (1ull << 63), /* An event has been created */
 };
 
-enum {
-	OPAL_P7IOC_DIAG_TYPE_NONE	= 0,
-	OPAL_P7IOC_DIAG_TYPE_RGC	= 1,
-	OPAL_P7IOC_DIAG_TYPE_BI		= 2,
-	OPAL_P7IOC_DIAG_TYPE_CI		= 3,
-	OPAL_P7IOC_DIAG_TYPE_MISC	= 4,
-	OPAL_P7IOC_DIAG_TYPE_I2C	= 5,
-	OPAL_P7IOC_DIAG_TYPE_LAST	= 6
-};
-
-struct OpalIoP7IOCErrorData {
-	__be16 type;
-
-	/* GEM */
-	__be64 gemXfir;
-	__be64 gemRfir;
-	__be64 gemRirqfir;
-	__be64 gemMask;
-	__be64 gemRwof;
-
-	/* LEM */
-	__be64 lemFir;
-	__be64 lemErrMask;
-	__be64 lemAction0;
-	__be64 lemAction1;
-	__be64 lemWof;
-
-	union {
-		struct OpalIoP7IOCRgcErrorData {
-			__be64 rgcStatus;	/* 3E1C10 */
-			__be64 rgcLdcp;		/* 3E1C18 */
-		}rgc;
-		struct OpalIoP7IOCBiErrorData {
-			__be64 biLdcp0;		/* 3C0100, 3C0118 */
-			__be64 biLdcp1;		/* 3C0108, 3C0120 */
-			__be64 biLdcp2;		/* 3C0110, 3C0128 */
-			__be64 biFenceStatus;	/* 3C0130, 3C0130 */
-
-			uint8_t biDownbound;	/* BI Downbound or Upbound */
-		}bi;
-		struct OpalIoP7IOCCiErrorData {
-			__be64 ciPortStatus;	/* 3Dn008 */
-			__be64 ciPortLdcp;	/* 3Dn010 */
-
-			uint8_t ciPort;		/* Index of CI port: 0/1 */
-		}ci;
-	};
-};
-
 /**
  * This structure defines the overlay which will be used to store PHB error
  * data upon request.
@@ -839,13 +797,11 @@ enum {
 };
 
 enum {
-	OPAL_PHB_ERROR_DATA_TYPE_P7IOC = 1,
 	OPAL_PHB_ERROR_DATA_TYPE_PHB3 = 2,
 	OPAL_PHB_ERROR_DATA_TYPE_PHB4 = 3
 };
 
 enum {
-	OPAL_P7IOC_NUM_PEST_REGS = 128,
 	OPAL_PHB3_NUM_PEST_REGS = 256,
 	OPAL_PHB4_NUM_PEST_REGS = 512
 };
@@ -854,65 +810,6 @@ struct OpalIoPhbErrorCommon {
 	__be32 version;
 	__be32 ioType;
 	__be32 len;
-};
-
-struct OpalIoP7IOCPhbErrorData {
-	struct OpalIoPhbErrorCommon common;
-
-	__be32 brdgCtl;
-
-	// P7IOC utl regs
-	__be32 portStatusReg;
-	__be32 rootCmplxStatus;
-	__be32 busAgentStatus;
-
-	// P7IOC cfg regs
-	__be32 deviceStatus;
-	__be32 slotStatus;
-	__be32 linkStatus;
-	__be32 devCmdStatus;
-	__be32 devSecStatus;
-
-	// cfg AER regs
-	__be32 rootErrorStatus;
-	__be32 uncorrErrorStatus;
-	__be32 corrErrorStatus;
-	__be32 tlpHdr1;
-	__be32 tlpHdr2;
-	__be32 tlpHdr3;
-	__be32 tlpHdr4;
-	__be32 sourceId;
-
-	__be32 rsv3;
-
-	// Record data about the call to allocate a buffer.
-	__be64 errorClass;
-	__be64 correlator;
-
-	//P7IOC MMIO Error Regs
-	__be64 p7iocPlssr;                // n120
-	__be64 p7iocCsr;                  // n110
-	__be64 lemFir;                    // nC00
-	__be64 lemErrorMask;              // nC18
-	__be64 lemWOF;                    // nC40
-	__be64 phbErrorStatus;            // nC80
-	__be64 phbFirstErrorStatus;       // nC88
-	__be64 phbErrorLog0;              // nCC0
-	__be64 phbErrorLog1;              // nCC8
-	__be64 mmioErrorStatus;           // nD00
-	__be64 mmioFirstErrorStatus;      // nD08
-	__be64 mmioErrorLog0;             // nD40
-	__be64 mmioErrorLog1;             // nD48
-	__be64 dma0ErrorStatus;           // nD80
-	__be64 dma0FirstErrorStatus;      // nD88
-	__be64 dma0ErrorLog0;             // nDC0
-	__be64 dma0ErrorLog1;             // nDC8
-	__be64 dma1ErrorStatus;           // nE00
-	__be64 dma1FirstErrorStatus;      // nE08
-	__be64 dma1ErrorLog0;             // nE40
-	__be64 dma1ErrorLog1;             // nE48
-	__be64 pestA[OPAL_P7IOC_NUM_PEST_REGS];
-	__be64 pestB[OPAL_P7IOC_NUM_PEST_REGS];
 };
 
 struct OpalIoPhb3ErrorData {
@@ -1087,6 +984,8 @@ enum opal_prd_msg_type {
 	OPAL_PRD_MSG_TYPE_FSP_OCC_LOAD_START, /* HBRT <-- OPAL */
 	OPAL_PRD_MSG_TYPE_FSP_OCC_LOAD_START_STATUS, /* HBRT --> OPAL */
 };
+
+#define OPAL_PRD_MSG_SIZE_MAX	(1 << 16)
 
 struct opal_prd_msg_header {
 	uint8_t		type;
@@ -1302,6 +1201,7 @@ enum {
 enum {
 	OPAL_IMC_COUNTERS_NEST = 1,
 	OPAL_IMC_COUNTERS_CORE = 2,
+	OPAL_IMC_COUNTERS_TRACE = 3,
 };
 
 

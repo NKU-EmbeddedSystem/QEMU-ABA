@@ -859,7 +859,23 @@ arch_of_init(void)
     feval("['] ppc-dma-sync to (dma-sync)");
 
 #ifdef CONFIG_DRIVER_PCI
-    ob_pci_init();
+    push_str("/");
+    fword("find-device");
+    feval("\" /\" open-dev to my-self");
+
+    switch (machine_id) {
+    case ARCH_MAC99:
+    case ARCH_MAC99_U3:
+        /* The NewWorld NVRAM is not located in the MacIO device */
+        macio_nvram_init("/", 0);
+        ob_pci_init();
+        ob_unin_init();
+        break;
+    default:
+        ob_pci_init();
+    }
+
+    feval("0 to my-self");
 #endif
 
     printk("\n");

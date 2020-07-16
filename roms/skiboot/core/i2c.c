@@ -140,18 +140,54 @@ opal_call(OPAL_I2C_REQUEST, opal_i2c_request, 3);
 #define MAX_NACK_RETRIES		 2
 #define REQ_COMPLETE_POLLING		 5  /* Check if req is complete
 					       in 5ms interval */
-
-struct i2c_sync_userdata {
-	int rc;
-	bool done;
-};
-
-static void i2c_sync_request_complete(int rc, struct i2c_request *req)
+int64_t i2c_request_sync(struct i2c_request *req)
 {
-	struct i2c_sync_userdata *ud = req->user_data;
-	ud->rc = rc;
-	lwsync();
-	ud->done = true;
+	uint64_t timer_period = msecs_to_tb(5), timer_count;
+	uint64_t time_to_wait = 0;
+	int64_t rc, waited, retries;
+
+	for (retries = 0; retries <= MAX_NACK_RETRIES; retries++) {
+		waited = 0;
+		timer_count = 0;
+
+		i2c_queue_req(req);
+
+		do {
+			time_to_wait = i2c_run_req(req);
+			if (!time_to_wait)
+				time_to_wait = REQ_COMPLETE_POLLING;
+			time_wait(time_to_wait);
+			waited += time_to_wait;
+			timer_count += time_to_wait;
+			if (timer_count > timer_period) {
+				/*
+				 * The above request may be relying on
+				 * timers to complete, yet there may
+				 * not be called, especially during
+				 * opal init. We could be looping here
+				 * forever. So explicitly check the
+				 * timers once in a while
+				 */
+				check_timers(false);
+				timer_count = 0;
+			}
+		} while (req->req_state != i2c_req_done);
+
+		lwsync();
+		rc = req->result;
+
+		/* retry on NACK, otherwise exit */
+		if (rc != OPAL_I2C_NACK_RCVD)
+			break;
+		req->req_state = i2c_req_new;
+	}
+
+	prlog(PR_DEBUG, "I2C: %s req op=%x offset=%x buf=%016llx buflen=%d "
+	      "delay=%lu/%lld rc=%lld\n",
+	      (rc) ? "!!!!" : "----", req->op, req->offset,
+	      *(uint64_t*) req->rw_buf, req->rw_len, tb_to_msecs(waited), req->timeout, rc);
+
+	return rc;
 }
 
 /**
@@ -169,16 +205,13 @@ static void i2c_sync_request_complete(int rc, struct i2c_request *req)
  *
  * Returns: Zero on success otherwise a negative error code
  */
-int i2c_request_send(int bus_id, int dev_addr, int read_write,
+int64_t i2c_request_send(int bus_id, int dev_addr, int read_write,
 		     uint32_t offset, uint32_t offset_bytes, void* buf,
 		     size_t buflen, int timeout)
 {
-	int rc, waited, retries;
 	struct i2c_request *req;
 	struct i2c_bus *bus;
-	uint64_t time_to_wait = 0;
-	struct i2c_sync_userdata ud;
-	uint64_t timer_period = msecs_to_tb(5), timer_count;
+	int64_t rc;
 
 	bus = i2c_find_bus_by_id(bus_id);
 	if (!bus) {
@@ -210,51 +243,9 @@ int i2c_request_send(int bus_id, int dev_addr, int read_write,
 	req->offset_bytes = offset_bytes;
 	req->rw_buf     = (void*) buf;
 	req->rw_len     = buflen;
-	req->completion = i2c_sync_request_complete;
 	req->timeout    = timeout;
-	ud.done = false;
-	req->user_data = &ud;
 
-	for (retries = 0; retries <= MAX_NACK_RETRIES; retries++) {
-		waited = 0;
-		timer_count = 0;
-
-		i2c_queue_req(req);
-
-		do {
-			time_to_wait = i2c_run_req(req);
-			if (!time_to_wait)
-				time_to_wait = REQ_COMPLETE_POLLING;
-			time_wait(time_to_wait);
-			waited += time_to_wait;
-			timer_count += time_to_wait;
-			if (timer_count > timer_period) {
-				/*
-				 * The above request may be relying on
-				 * timers to complete, yet there may
-				 * not be called, especially during
-				 * opal init. We could be looping here
-				 * forever. So explicitly check the
-				 * timers once in a while
-				 */
-				check_timers(false);
-				timer_count = 0;
-			}
-		} while (!ud.done);
-
-		lwsync();
-		rc = ud.rc;
-
-		/* error or success */
-		if (rc != OPAL_I2C_NACK_RCVD)
-			break;
-		ud.done = false;
-	}
-
-	prlog(PR_DEBUG, "I2C: %s req op=%x offset=%x buf=%016llx buflen=%d "
-	      "delay=%lu/%d rc=%d\n",
-	      (rc) ? "!!!!" : "----", req->op, req->offset,
-	      *(uint64_t*) buf, req->rw_len, tb_to_msecs(waited), timeout, rc);
+	rc = i2c_request_sync(req);
 
 	free(req);
 	if (rc)

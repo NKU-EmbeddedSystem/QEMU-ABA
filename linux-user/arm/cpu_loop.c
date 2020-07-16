@@ -71,10 +71,6 @@
         put_user_u16(__x, (gaddr));                     \
     })
 
-//#define HASH_LLSC
-//#define LLSC_LOG
-//#define PICO_ST_LLSC
-#define PF_LLSC
 /* Commpage handling -- there is no commpage for AArch64 */
 
 /*
@@ -209,160 +205,6 @@ do_kernel_trap(CPUARMState *env)
     return 0;
 }
 
-/* Load exclusive handling for AArch32 */
-static int do_ldrex(CPUARMState *env)
-{
-    uint64_t val;
-    int segv = 0;
-    uint32_t addr;
-#ifdef HASH_LLSC
-	uint32_t hash_addr;
-#endif
-    //fprintf(stderr, "do_ldrex\n");
-    start_exclusive();
-
-    addr = env->exclusive_addr;
-
-    segv = get_user_u32(val, addr);
-	assert(segv == 0);
-	env->exclusive_val = val;
-
-#ifdef HASH_LLSC
-	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
-    segv = put_user_u32(env->exclusive_tid, hash_addr);
-	assert(segv == 0);
-#endif
-	
-    env->regs[15] += 4;
-    env->regs[(env->exclusive_info) & 0xf] = val;
-	//fprintf(stderr, "ldrex reg = %d, reg15 = %d, val = %ld!, addr = %x\n",
-	//		(env->exclusive_info) & 0xf , env->regs[15], val, addr);
-
-#ifdef LLSC_LOG
-	fprintf(stderr, "thread %d ldrex done! val %lx, addr %x\n", env->exclusive_tid, env->exclusive_val, addr);
-#endif
-    end_exclusive();
-    return segv;
-}
-
-#ifdef PF_LLSC
-extern int x_monitor_check_exclusive(void* p_node, uint32_t addr);
-extern int x_monitor_check_and_clean(int tid, uint32_t addr);
-#endif
-/* Store exclusive handling for AArch32 */
-static int do_strex(CPUARMState *env)
-{
-    uint64_t val;
-    int size;
-    int rc = 1;
-    int segv = 0;
-    uint32_t addr;
-f
-    //fprintf(stderr, "[do_strex]\tdo_strex\n");
-    start_exclusive();
-
-    if (env->exclusive_addr != env->exclusive_test) {
-#ifdef LLSC_LOG
-		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx\n", env->exclusive_tid, val, env->exclusive_val);
-#endif
-        goto fail;
-    }
-    /* We know we're always AArch32 so the address is in uint32_t range
-     * unless it was the -1 exclusive-monitor-lost value (which won't
-     * match exclusive_test above).
-     */
-    assert(extract64(env->exclusive_addr, 32, 32) == 0);
-    addr = env->exclusive_addr;
-#ifdef PF_LLSC
-	target_ulong page_addr = addr & 0xfffff000;
-	target_mprotect(page_addr, 0x1000, PROT_READ|PROT_WRITE);
-	//target_mremap();
-	if (x_monitor_check_exclusive((void*)env->exclusive_node, addr) != 1) {
-#ifdef LLSC_LOG
-		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, exclusive mark lost.\n", env->exclusive_tid, val, env->exclusive_val);
-#endif
-		goto fail;
-	}
-#endif
-
-	
-    size = env->exclusive_info & 0xf;
-    switch (size) {
-    case 0:
-        segv = get_user_u8(val, addr);
-        break;
-    case 1:
-        segv = get_user_u16(val, addr);
-        break;
-    case 2:
-    case 3:
-        segv = get_user_u32(val, addr);
-        break;
-    default:
-        abort();
-    }
-    if (segv) {
-        env->exception.vaddress = addr;
-        goto done;
-    }
-    if (size == 3) {
-        uint32_t valhi;
-        segv = get_user_u32(valhi, addr + 4);
-        if (segv) {
-            env->exception.vaddress = addr + 4;
-            goto done;
-        }
-        val = deposit64(val, 32, 32, valhi);
-    }
-    if (val != env->exclusive_val) {
-#ifdef LLSC_LOG
-	fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
-#endif
-        goto fail;
-    }
-
-    val = env->regs[(env->exclusive_info >> 8) & 0xf];
-#ifdef LLSC_LOG
-	fprintf(stderr, "thread %d strex suc! newval %lx, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
-#endif
-#ifdef PF_LLSC
-	x_monitor_check_and_clean(env->exclusive_tid, addr);
-#endif
-    switch (size) {
-    case 0:
-        segv = put_user_u8(val, addr);
-        break;
-    case 1:
-        segv = put_user_u16(val, addr);
-        break;
-    case 2:
-    case 3:
-        segv = put_user_u32(val, addr);
-        break;
-    }
-    if (segv) {
-		assert(segv);
-        env->exception.vaddress = addr;
-        goto done;
-    }
-    if (size == 3) {
-        val = env->regs[(env->exclusive_info >> 12) & 0xf];
-        segv = put_user_u32(val, addr + 4);
-        if (segv) {
-            env->exception.vaddress = addr + 4;
-            goto done;
-        }
-    }
-    rc = 0;
-fail:
-    env->regs[15] += 4;
-    env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
-	
-done:
-    end_exclusive();
-    return segv;
-}
-
 void cpu_loop(CPUARMState *env)
 {
     CPUState *cs = env_cpu(env);
@@ -483,9 +325,6 @@ void cpu_loop(CPUARMState *env)
 
                 if (n == ARM_NR_cacheflush) {
                     /* nop */
-                } else if (n == ARM_NR_semihosting
-                           || n == ARM_NR_thumb_semihosting) {
-                    env->regs[0] = do_arm_semihosting (env);
                 } else if (n == 0 || n >= ARM_SYSCALL_BASE || env->thumb) {
                     /* linux syscall */
                     if (env->thumb || n == 0) {
@@ -571,19 +410,6 @@ void cpu_loop(CPUARMState *env)
         case EXCP_ATOMIC:
             cpu_exec_step_atomic(cs);
             break;
-		case EXCP_LDREX:
-			if (!do_ldrex(env)) {
-				break;
-			}
-			else {
-				EXCP_DUMP(env, "qemu: unhandled CPU exception 0x%x - aborting\n", trapnr);
-            	abort();
-			}
-		case EXCP_STREX:
-            if (!do_strex(env)) {
-                break;
-            }
-            /* fall through for segv */
         default:
         error:
             EXCP_DUMP(env, "qemu: unhandled CPU exception 0x%x - aborting\n", trapnr);
@@ -614,6 +440,7 @@ void target_cpu_copy_regs(CPUArchState *env, struct target_pt_regs *regs)
     } else {
         env->cp15.sctlr_el[1] |= SCTLR_B;
     }
+    arm_rebuild_hflags(env);
 #endif
 
     ts->stack_base = info->start_stack;

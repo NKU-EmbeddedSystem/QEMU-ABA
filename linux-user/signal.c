@@ -25,8 +25,6 @@
 #include "trace.h"
 #include "signal-common.h"
 
-#define PF_LLSC
-//#define PF_LOG
 static struct target_sigaction sigact_table[TARGET_NSIG];
 
 static void host_signal_handler(int host_signum, siginfo_t *info,
@@ -650,34 +648,7 @@ static inline void rewind_if_in_safe_syscall(void *puc)
 }
 #endif
 
-#ifdef PF_LLSC
-extern void cpu_exec_step_atomic_pf(CPUState *cpu);
-extern int x_monitor_check_and_clean(int tid, uint32_t addr);
-extern pthread_mutex_t g_sc_lock;
-static int pf_llsc_segfault_handler(int host_signum, siginfo_t *pinfo, void *puc)
-{
-    siginfo_t *info = pinfo;
-    ucontext_t *uc = (ucontext_t *)puc;
-    unsigned long host_addr = (unsigned long)info->si_addr;
-    unsigned long  guest_addr = h2g(host_addr);
-	pthread_mutex_lock(&g_sc_lock);
-	target_ulong page_addr = guest_addr & 0xfffff000;
-    int is_write = ((uc->uc_mcontext.gregs[REG_ERR] & 0x2) != 0);
-	
-	//assert(is_write == 1);
-		CPUArchState *env = thread_cpu->env_ptr;
-    	CPUState *cpu = env_cpu(env);
-		fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, perm %d, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr, is_write+1, ((CPUARMState*)env)->regs[15]);
-	if (is_write) {
-		x_monitor_check_and_clean(((CPUARMState*)cpu)->exclusive_tid, guest_addr);
-		target_mprotect(page_addr, 0x1000, PROT_READ | PROT_WRITE);
-	}
-	pthread_mutex_unlock(&g_sc_lock);
-    return 0;
-}
-#endif
-
-
+int pf_counter = 0;
 static void host_signal_handler(int host_signum, siginfo_t *info,
                                 void *puc)
 {
@@ -690,19 +661,11 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     ucontext_t *uc = puc;
     struct emulated_sigtable *k;
 
-#ifdef PF_LLSC
-	// dispatch the segfault to PST pagefault handler
-	if ((host_signum == SIGSEGV) )//&& (info->si_code == SEGV_ACCERR))
-	{
-		pf_llsc_segfault_handler(host_signum, info, puc);
-		return;
-	}
-#endif
-
     /* the CPU emulator uses some host signals to detect exceptions,
        we forward to it some signals */
     if ((host_signum == SIGSEGV || host_signum == SIGBUS)
         && info->si_code > 0) {
+		__sync_fetch_and_add(&pf_counter, 1);
         if (cpu_signal_handler(host_signum, info, puc))
             return;
     }

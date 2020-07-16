@@ -31,7 +31,7 @@ uint32_t pir_to_chip_id(uint32_t pir)
 	else if (proc_gen == proc_gen_p8)
 		return P8_PIR2GCID(pir);
 	else
-		return P7_PIR2GCID(pir);
+		assert(false);
 }
 
 uint32_t pir_to_core_id(uint32_t pir)
@@ -41,7 +41,7 @@ uint32_t pir_to_core_id(uint32_t pir)
 	else if (proc_gen == proc_gen_p8)
 		return P8_PIR2COREID(pir);
 	else
-		return P7_PIR2COREID(pir);
+		assert(false);
 }
 
 uint32_t pir_to_thread_id(uint32_t pir)
@@ -51,7 +51,7 @@ uint32_t pir_to_thread_id(uint32_t pir)
 	else if (proc_gen == proc_gen_p8)
 		return P8_PIR2THREADID(pir);
 	else
-		return P7_PIR2THREADID(pir);
+		assert(false);
 }
 
 struct proc_chip *next_chip(struct proc_chip *chip)
@@ -144,9 +144,11 @@ void init_chips(void)
 		prlog(PR_NOTICE, "CHIP: Detected Awan emulator\n");
 	}
 	/* Detect Qemu */
-	if (dt_node_is_compatible(dt_root, "qemu,powernv")) {
+	if (dt_node_is_compatible(dt_root, "qemu,powernv") ||
+	    dt_node_is_compatible(dt_root, "qemu,powernv8") ||
+	    dt_node_is_compatible(dt_root, "qemu,powernv9")) {
 		proc_chip_quirks |= QUIRK_NO_CHIPTOD | QUIRK_NO_PBA
-			| QUIRK_NO_DIRECT_CTL;
+			| QUIRK_NO_DIRECT_CTL | QUIRK_NO_RNG;
 		prlog(PR_NOTICE, "CHIP: Detected Qemu simulator\n");
 	}
 

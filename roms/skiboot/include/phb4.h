@@ -125,7 +125,6 @@
 #define PHB4_SLOT_FRESET			PCI_SLOT_STATE_FRESET
 #define   PHB4_SLOT_FRESET_START		(PHB4_SLOT_FRESET + 1)
 #define   PHB4_SLOT_FRESET_ASSERT_DELAY		(PHB4_SLOT_FRESET + 2)
-#define   PHB4_SLOT_FRESET_DEASSERT_DELAY	(PHB4_SLOT_FRESET + 3)
 #define PHB4_SLOT_CRESET			PCI_SLOT_STATE_CRESET
 #define   PHB4_SLOT_CRESET_START		(PHB4_SLOT_CRESET + 1)
 #define   PHB4_SLOT_CRESET_WAIT_CQ		(PHB4_SLOT_CRESET + 2)
@@ -195,6 +194,7 @@ struct phb4 {
 	uint32_t		num_pes;
 	uint32_t		max_num_pes;
 	uint32_t		num_irqs;
+	uint64_t		creset_start_time;
 
 	/* SkiBoot owned in-memory tables */
 	uint16_t		*tbl_rtt;

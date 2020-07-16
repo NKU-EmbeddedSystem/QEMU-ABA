@@ -31,7 +31,6 @@
 #include "pci.h"
 #include "pci_database.h"
 #ifdef CONFIG_DRIVER_MACIO
-#include "cuda.h"
 #include "macio.h"
 #endif
 #ifdef CONFIG_DRIVER_USB
@@ -54,7 +53,6 @@
 DECLARE_UNNAMED_NODE( ob_pci_bus_node, INSTALL_OPEN, 2*sizeof(int) );
 DECLARE_UNNAMED_NODE( ob_pci_bridge_node, INSTALL_OPEN, 2*sizeof(int) );
 DECLARE_UNNAMED_NODE( ob_pci_simple_node, 0, 2*sizeof(int) );
-DECLARE_UNNAMED_NODE( ob_pci_empty_node, 0, 2*sizeof(int) );
 
 const pci_arch_t *arch;
 
@@ -186,11 +184,6 @@ ob_pci_open(int *idx)
 
 static void
 ob_pci_close(int *idx)
-{
-}
-
-static void
-ob_pci_initialize(int *idx)
 {
 }
 
@@ -462,7 +455,6 @@ ob_pci_dma_sync(int *idx)
 }
 
 NODE_METHODS(ob_pci_bus_node) = {
-	{ NULL,			ob_pci_initialize	},
 	{ "open",		ob_pci_open		},
 	{ "close",		ob_pci_close		},
 	{ "decode-unit",	ob_pci_decode_unit	},
@@ -485,7 +477,6 @@ ob_pci_bridge_map_in(int *idx)
 }
 
 NODE_METHODS(ob_pci_bridge_node) = {
-	{ NULL,			ob_pci_initialize	},
 	{ "open",		ob_pci_open		},
 	{ "close",		ob_pci_close		},
 	{ "decode-unit",	ob_pci_decode_unit	},
@@ -501,10 +492,6 @@ NODE_METHODS(ob_pci_bridge_node) = {
 NODE_METHODS(ob_pci_simple_node) = {
 	{ "open",		ob_pci_open		},
 	{ "close",		ob_pci_close		},
-};
-
-NODE_METHODS(ob_pci_empty_node) = {
-	{ NULL,			ob_pci_initialize	}
 };
 
 static void pci_set_bus_range(const pci_config_t *config)
@@ -528,7 +515,9 @@ static void pci_set_bus_range(const pci_config_t *config)
 	set_property(dev, "bus-range", (char *)props, 2 * sizeof(props[0]));
 }
 
-static void pci_host_set_reg(phandle_t phandle)
+static void ob_pci_reload_device_path(phandle_t phandle, pci_config_t *config);
+
+static void pci_host_set_reg(phandle_t phandle, pci_config_t *config)
 {
     phandle_t dev = phandle;
 
@@ -543,6 +532,8 @@ static void pci_host_set_reg(phandle_t phandle)
             arch->cfg_len);
 
     set_property(dev, "reg", (char *)props, ncells * sizeof(props[0]));
+
+    ob_pci_reload_device_path(dev, config);
 
 #if defined(CONFIG_DEBUG_PCI)
     dump_reg_property("pci_host_set_reg", 4, props);
@@ -579,8 +570,6 @@ static void pci_host_set_ranges(const pci_config_t *config)
 
 int host_config_cb(const pci_config_t *config)
 {
-	//XXX this overrides "reg" property
-	pci_host_set_reg(get_cur_dev());
 	pci_host_set_ranges(config);
 
 	return 0;
@@ -1265,6 +1254,7 @@ static void ob_pci_add_properties(phandle_t phandle,
 	uint8_t rev;
 	uint8_t class_prog;
 	uint32_t class_code;
+	char path[256];
 
 	vendor_id = pci_config_read16(addr, PCI_VENDOR_ID);
 	device_id = pci_config_read16(addr, PCI_DEVICE_ID);
@@ -1272,24 +1262,22 @@ static void ob_pci_add_properties(phandle_t phandle,
 	class_prog = pci_config_read8(addr, PCI_CLASS_PROG);
 	class_code = pci_config_read16(addr, PCI_CLASS_DEVICE);
 
+    /* Default path if we don't match anything */
+    snprintf(path, sizeof(path), "pci%x,%x", vendor_id, device_id);
+
     if (pci_dev) {
         /**/
         if (pci_dev->name) {
             push_str(pci_dev->name);
-            fword("encode-string");
-            push_str("name");
-            fword("property");
+            fword("device-name");
         } else {
-            char path[256];
-            snprintf(path, sizeof(path),
-                    "pci%x,%x", vendor_id, device_id);
             push_str(path);
-            fword("encode-string");
-            push_str("name");
-            fword("property");
+            fword("device-name");
         }
     } else {
         PCI_DPRINTF("*** missing pci_dev\n");
+        push_str(path);
+        fword("device-name");
     }
 
 	/* create properties as described in 2.5 */
@@ -1335,15 +1323,11 @@ static void ob_pci_add_properties(phandle_t phandle,
 	if (pci_dev) {
 		if (pci_dev->type) {
 			push_str(pci_dev->type);
-			fword("encode-string");
-			push_str("device_type");
-			fword("property");
+			fword("device-type");
 		}
 		if (pci_dev->model) {
 			push_str(pci_dev->model);
-			fword("encode-string");
-			push_str("model");
-			fword("property");
+			fword("model");
 		}
 		if (pci_dev->compat)
 			set_property(dev, "compatible",
@@ -1764,8 +1748,10 @@ static phandle_t ob_configure_pci_device(const char* parent_path,
         const pci_dev_t *pci_dev;
     uint8_t class, subclass, iface;
     int num_bars, rom_bar;
+    uint32_t props[3];
+    char *unit_str;
 
-    phandle_t phandle = 0;
+    phandle_t phandle = 0, t;
     int is_host_bridge = 0;
 
     if (!ob_pci_read_identification(bus, devnum, fn, &vid, &did, &class, &subclass)) {
@@ -1789,53 +1775,67 @@ static phandle_t ob_configure_pci_device(const char* parent_path,
         }
     }
 
-    /* stop adding host bridge accessible from it's primary bus
-       PCI host bridge is to be added by host code
-    */
     if (class == PCI_BASE_CLASS_BRIDGE &&
             subclass == PCI_SUBCLASS_BRIDGE_HOST) {
         is_host_bridge = 1;
     }
 
+    /* stop adding host bridge accessible from it's primary bus
+       PCI host bridge is to be added by host code
+    */
     if (is_host_bridge) {
         /* reuse device tree node */
         PCI_DPRINTF("host bridge found - ");
-        snprintf(config.path, sizeof(config.path),
-                "%s", parent_path);
+
+        t = find_dev(parent_path);
+        if (get_property(t, "vendor-id", NULL)) {
+            PCI_DPRINTF("host bridge already configured\n");
+            return 0;
+        }
     } else if (pci_dev == NULL || pci_dev->name == NULL) {
         snprintf(config.path, sizeof(config.path),
                 "%s/pci%x,%x", parent_path, vid, did);
-    }
-    else {
+    } else {
         snprintf(config.path, sizeof(config.path),
                 "%s/%s", parent_path, pci_dev->name);
     }
+
+    fword("new-device");
 
     PCI_DPRINTF("%s - ", config.path);
 
     config.dev = addr & 0x00FFFFFF;
 
+    if (!is_host_bridge) {
+        /* Get encoded address for set-args */
+        pci_encode_phys_addr(props, 0, CONFIGURATION_SPACE, config.dev, 0, 0);
+        PUSH(props[2]);
+        PUSH(props[1]);
+        PUSH(props[0]);
+        call_parent_method("encode-unit");
+
+        unit_str = pop_fstr_copy();
+
+        /* Call set-args to set up my-space and my-address */
+        PUSH(0);
+        PUSH(0);
+        push_str(unit_str);
+        fword("set-args");
+
+        free(unit_str);
+    }
+
+    phandle = get_cur_dev();
+
     switch (class) {
     case PCI_BASE_CLASS_BRIDGE:
         if (subclass != PCI_SUBCLASS_BRIDGE_HOST) {
-            REGISTER_NAMED_NODE_PHANDLE(ob_pci_bridge_node, config.path, phandle);
+            BIND_NODE_METHODS(phandle, ob_pci_bridge_node);
+        } else {
+            BIND_NODE_METHODS(phandle, ob_pci_bus_node);
         }
         break;
-    default:
-        REGISTER_NAMED_NODE_PHANDLE(ob_pci_empty_node, config.path, phandle);
-        break;
     }
-
-    if (is_host_bridge) {
-        phandle = find_dev(config.path);
-
-        if (get_property(phandle, "vendor-id", NULL)) {
-            PCI_DPRINTF("host bridge already configured\n");
-            return 0;
-        }
-    }
-
-    activate_dev(phandle);
 
     if (htype & PCI_HEADER_TYPE_BRIDGE) {
         num_bars = 2;
@@ -1852,6 +1852,8 @@ static phandle_t ob_configure_pci_device(const char* parent_path,
 
     if (!is_host_bridge) {
         pci_set_reg(phandle, &config, num_bars);
+    } else {
+        pci_host_set_reg(phandle, &config);
     }
 
     /* call device-specific configuration callback */
@@ -1862,11 +1864,8 @@ static phandle_t ob_configure_pci_device(const char* parent_path,
 
     /* if devices haven't supplied open/close words then supply them with simple defaults */
     if (!find_package_method("open", phandle) && !find_package_method("close", phandle)) {
-        REGISTER_NODE_METHODS(ob_pci_simple_node, config.path);
+        BIND_NODE_METHODS(phandle, ob_pci_simple_node);
     }
-
-    /* device is configured so we may move it out of scope */
-    device_end();
 
     /* scan bus behind bridge device */
     //if (htype & PCI_HEADER_TYPE_BRIDGE && class == PCI_BASE_CLASS_BRIDGE) {
@@ -1881,6 +1880,8 @@ static phandle_t ob_configure_pci_device(const char* parent_path,
 
         ob_configure_pci_bridge(addr, bus_num, mem_base, io_base, bus, &config);
     }
+
+    fword("finish-device");
 
     return phandle;
 }
@@ -2103,8 +2104,6 @@ int ob_pci_init(void)
 
     PCI_DPRINTF("Initializing PCI host bridge...\n");
 
-    activate_device("/");
-
     /* Find all PCI bridges */
 
     mem_base = arch->pci_mem_base;
@@ -2130,16 +2129,9 @@ int ob_pci_init(void)
         /* create root node for host PCI bridge */
 
         /* configure  */
-        snprintf(config.path, sizeof(config.path), "/pci");
+        strncpy(config.path, "", sizeof(config.path));
 
-        REGISTER_NAMED_NODE_PHANDLE(ob_pci_bus_node, config.path, phandle_host);
-
-        pci_host_set_reg(phandle_host);
-
-        /* update device path after changing "reg" property */
-        ob_pci_reload_device_path(phandle_host, &config);
-
-        ob_configure_pci_device(config.path, &bus, &mem_base, &io_base,
+        phandle_host = ob_configure_pci_device(config.path, &bus, &mem_base, &io_base,
                 bus, devnum, fn, 0);
 
         /* we expect single host PCI bridge
@@ -2153,8 +2145,6 @@ int ob_pci_init(void)
     /* configure the host bridge interrupt map */
     intc = ob_pci_host_set_interrupt_map(phandle_host);
     ob_pci_bus_set_interrupt_map(phandle_host, intc, ob_pci_host_bus_interrupt);
-
-    device_end();
 
     return 0;
 }

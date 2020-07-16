@@ -28,18 +28,14 @@
 
 /* One per cpu, plus one for NMIs */
 struct tracebuf {
-	/* Mask to apply to get buffer offset. */
-	__be64 mask;
+	/* Size used to get buffer offset */
+	__be64 buf_size;
 	/* This where the buffer starts. */
 	__be64 start;
 	/* This is where writer has written to. */
 	__be64 end;
 	/* This is where the writer wrote to previously. */
 	__be64 last;
-	/* This is where the reader is up to. */
-	__be64 rpos;
-	/* If the last one we read was a repeat, this shows how many. */
-	__be32 last_repeat;
 	/* Maximum possible size of a record. */
 	__be32 max_size;
 

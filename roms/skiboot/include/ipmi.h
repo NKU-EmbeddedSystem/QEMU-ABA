@@ -20,6 +20,7 @@
 #include <stdint.h>
 #include <ccan/list/list.h>
 #include <stdbool.h>
+#include <types.h>
 
 #define MAX_IPMI_SENSORS 255
 
@@ -47,13 +48,13 @@
 #define IPMI_CHASSIS_CONTROL_CMD		0x02
 #define IPMI_CHASSIS_RESET_CMD			0x03
 #define IPMI_CHASSIS_IDENTIFY_CMD		0x04
-#define IPMI_CHASSIS_SET_PANEL_BUTTON_EN_CMD	0x05
-#define IPMI_CHASSIS_SET_CAP_CMD		0x06
-#define IPMI_CHASSIS_SET_PWR_RESTORE_CMD	0x07
-#define IPMI_CHASSIS_SET_PWR_CYCLE_CMD		0x08
-#define IPMI_CHASSIS_GET_SYS_RESTART_CAUSE_CMD	0x09
-#define IPMI_CHASSIS_SET_SYS_BOOT_OPT_CMD	0x0a
-#define IPMI_CHASSIS_GET_SYS_BOOT_OPT_CMD	0x0b
+#define IPMI_CHASSIS_SET_PANEL_BUTTON_EN_CMD	0x0a
+#define IPMI_CHASSIS_SET_CAP_CMD		0x05
+#define IPMI_CHASSIS_SET_PWR_RESTORE_CMD	0x06
+#define IPMI_CHASSIS_SET_PWR_CYCLE_CMD		0x0b
+#define IPMI_CHASSIS_GET_SYS_RESTART_CAUSE_CMD	0x07
+#define IPMI_CHASSIS_SET_SYS_BOOT_OPT_CMD	0x08
+#define IPMI_CHASSIS_GET_SYS_BOOT_OPT_CMD	0x09
 #define IPMI_CHASSIS_GET_POH_COUNTER_CMD	0x0f
 
 
@@ -109,6 +110,7 @@
 #define IPMI_GET_SEL_TIME		IPMI_CODE(IPMI_NETFN_STORAGE, 0x48)
 #define IPMI_SET_SEL_TIME		IPMI_CODE(IPMI_NETFN_STORAGE, 0x49)
 #define IPMI_CHASSIS_CONTROL		IPMI_CODE(IPMI_NETFN_CHASSIS, 0x02)
+#define IPMI_CHASSIS_GET_BOOT_OPT	IPMI_CODE(IPMI_NETFN_CHASSIS, 0x09)
 #define IPMI_BMC_GET_DEVICE_ID		IPMI_CODE(IPMI_NETFN_APP, 0x01)
 #define IPMI_SET_POWER_STATE		IPMI_CODE(IPMI_NETFN_APP, 0x06)
 #define IPMI_GET_POWER_STATE		IPMI_CODE(IPMI_NETFN_APP, 0x07)
@@ -175,13 +177,22 @@ struct ipmi_msg {
 };
 
 struct ipmi_backend {
-	uint64_t opal_event_ipmi_recv;
+	__be64 opal_event_ipmi_recv;
 	struct ipmi_msg *(*alloc_msg)(size_t, size_t);
 	void (*free_msg)(struct ipmi_msg *);
 	int (*queue_msg)(struct ipmi_msg *);
 	int (*queue_msg_head)(struct ipmi_msg *);
 	int (*dequeue_msg)(struct ipmi_msg *);
 	void (*disable_retry)(struct ipmi_msg *);
+	/*
+	 * When processing a synchronous IPMI message, pollers may not run, and
+	 * neither may timers (as the synchronous IPMI message may be being
+	 * done with locks held, which a timer may then try to also take).
+	 *
+	 * So, ensure we have a way to drive any state machines that an IPMI
+	 * backend may neeed to crank to ensure forward progress.
+	 */
+	void (*poll)(void);
 };
 
 extern struct ipmi_backend *ipmi_backend;
@@ -290,5 +301,11 @@ extern int ipmi_get_bmc_info_request(void);
 
 /* Add BMC firmware info to device tree */
 extern void ipmi_dt_add_bmc_info(void);
+
+/* Get BMC Boot Options info (specifically OEM param 0x62) */
+int ipmi_get_chassis_boot_opt_request(void);
+
+/* Get OEM Boot Option 0x62 for SBE validation flag */
+int ipmi_chassis_check_sbe_validation(void);
 
 #endif

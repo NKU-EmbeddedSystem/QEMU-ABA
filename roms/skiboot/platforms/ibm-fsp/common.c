@@ -170,16 +170,40 @@ void ibm_fsp_init(void)
 
 	if (proc_gen >= proc_gen_p9)
 		prd_init();
+
+	preload_io_vpd();
 }
 
-void ibm_fsp_exit(void)
+void ibm_fsp_finalise_dt(bool is_reboot)
 {
+	if (is_reboot)
+		return;
+
 	/*
 	 * LED related SPCN commands might take a while to
 	 * complete. Call this as late as possible to
 	 * ensure we have all the LED information.
 	 */
 	create_led_device_nodes();
+
+	/*
+	 * OCC takes few secs to boot.  Call this as late as
+	 * as possible to avoid delay.
+	 */
+	occ_pstates_init();
+
+	/* Wait for FW VPD data read to complete */
+	fsp_code_update_wait_vpd(true);
+
+	fsp_console_select_stdout();
+}
+
+void ibm_fsp_exit(void)
+{
+	op_panel_disable_src_echo();
+
+	/* Clear SRCs on the op-panel when Linux starts */
+	op_panel_clear_src();
 }
 
 int64_t ibm_fsp_cec_reboot(void)
@@ -236,3 +260,32 @@ int64_t ibm_fsp_sensor_read(uint32_t sensor_hndl, int token,
 {
 	return fsp_opal_read_sensor(sensor_hndl, token, sensor_data);
 }
+
+int __attrconst fsp_heartbeat_time(void)
+{
+	/* Same as core/timer.c HEARTBEAT_DEFAULT_MS * 10 */
+	return 200 * 10;
+}
+
+static void fsp_psihb_interrupt(void)
+{
+	/* Poll the console buffers on any interrupt since we don't
+	 * get send notifications
+	 */
+	fsp_console_poll(NULL);
+}
+
+struct platform_psi fsp_platform_psi = {
+	.psihb_interrupt = fsp_psihb_interrupt,
+	.link_established = fsp_reinit_fsp,
+	.fsp_interrupt = fsp_interrupt,
+};
+
+struct platform_prd fsp_platform_prd = {
+	.msg_response = hservice_hbrt_msg_response,
+	.send_error_log = hservice_send_error_log,
+	.send_hbrt_msg = hservice_send_hbrt_msg,
+	.wakeup = hservice_wakeup,
+	.fsp_occ_load_start_status = fsp_occ_load_start_status,
+	.fsp_occ_reset_status = fsp_occ_reset_status,
+};

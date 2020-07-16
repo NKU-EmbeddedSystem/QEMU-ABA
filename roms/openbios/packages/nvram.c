@@ -105,7 +105,7 @@ create_free_part( char *ptr, int size )
 	nvpart_t *nvp = (nvpart_t*)ptr;
 	memset( nvp, 0, size );
 
-	strncpy( nvp->name, "777777777777", sizeof(nvp->name) );
+	strncpy( nvp->name, "77777777777", sizeof(nvp->name) );
 	nvp->signature = NV_SIG_FREE;
 	nvp->len_hi = (size /16) >> 8;
 	nvp->len_lo = size /16;
@@ -185,8 +185,6 @@ nvconf_init( void )
 	nvram.size = arch_nvram_size();
 	nvram.data = malloc( nvram.size );
 	arch_nvram_get( nvram.data );
-
-	bind_func( "update-nvram", update_nvram );
 
 	for( ;; ) {
 		nvpart_t *p = NULL;
@@ -291,18 +289,45 @@ nvram_size( __attribute__((unused)) nvram_ibuf_t *nd )
 	PUSH( nvram.size );
 }
 
+static void
+nvram_open( __attribute__((unused)) nvram_ibuf_t *nd )
+{
+	RET(-1);
+}
+
+static void
+nvram_close( __attribute__((unused)) nvram_ibuf_t *nd )
+{
+}
+
 NODE_METHODS( nvram ) = {
+	{ "open",	(void*)nvram_open	},
+	{ "close",	(void*)nvram_close	},
 	{ "size",	(void*)nvram_size	},
 	{ "read",	(void*)nvram_read	},
 	{ "write",	(void*)nvram_write	},
 	{ "seek",	(void*)nvram_seek	},
+	{ "update-nvram",	(void*)update_nvram	},
 };
 
 
-void
+phandle_t
 nvram_init( const char *path )
 {
-	nvconf_init();
+	phandle_t ph;
 
-	REGISTER_NAMED_NODE( nvram, path );
+	push_str(path);
+	fword("find-device");
+
+	fword("new-device");
+
+	ph = get_cur_dev();
+
+	push_str("nvram");
+	fword("device-name");
+
+	BIND_NODE_METHODS(get_cur_dev(), nvram);
+	fword("finish-device");
+
+	return ph;
 }

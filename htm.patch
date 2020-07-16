@@ -1,0 +1,561 @@
+diff --git a/accel/tcg/cpu-exec.c b/accel/tcg/cpu-exec.c
+index c01f59c..90d8ffc 100644
+--- a/accel/tcg/cpu-exec.c
++++ b/accel/tcg/cpu-exec.c
+@@ -28,10 +28,12 @@
+ #include "sysemu/qtest.h"
+ #include "qemu/timer.h"
+ #include "qemu/rcu.h"
++#include "qemu/htm.h"
+ #include "exec/tb-hash.h"
+ #include "exec/tb-lookup.h"
+ #include "exec/log.h"
+ #include "qemu/main-loop.h"
++#include "qemu/htm.h"
+ #if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
+ #include "hw/i386/apic.h"
+ #endif
+@@ -702,6 +704,9 @@ int cpu_exec(CPUState *cpu)
+         if (qemu_mutex_iothread_locked()) {
+             qemu_mutex_unlock_iothread();
+         }
++		stop_the_world_reset();
++		if(unlikely(htm_test()))
++			htm_end();
+         qemu_plugin_disable_mem_helpers(cpu);
+ 
+         assert_no_pages_locked();
+diff --git a/build.sh b/build.sh
+new file mode 100644
+index 0000000..0236a95
+--- /dev/null
++++ b/build.sh
+@@ -0,0 +1 @@
++./configure --disable-kvm --disable-werror --target-list=arm-linux-user --extra-cflags="-mrtm"
+diff --git a/cpus-common.c b/cpus-common.c
+index eaf590c..6bb853f 100644
+--- a/cpus-common.c
++++ b/cpus-common.c
+@@ -215,11 +215,12 @@ void end_exclusive(void)
+     qemu_mutex_unlock(&qemu_cpu_list_lock);
+ }
+ 
++extern void stop_the_world_sleep();
+ /* Wait for exclusive ops to finish, and begin cpu execution.  */
+ void cpu_exec_start(CPUState *cpu)
+ {
+     atomic_set(&cpu->running, true);
+-
++	stop_the_world_sleep();
+     /* Write cpu->running before reading pending_cpus.  */
+     smp_mb();
+ 
+diff --git a/include/exec/exec-all.h b/include/exec/exec-all.h
+index d85e610..ae7aaa1 100644
+--- a/include/exec/exec-all.h
++++ b/include/exec/exec-all.h
+@@ -75,6 +75,11 @@ void QEMU_NORETURN cpu_loop_exit(CPUState *cpu);
+ void QEMU_NORETURN cpu_loop_exit_restore(CPUState *cpu, uintptr_t pc);
+ void QEMU_NORETURN cpu_loop_exit_atomic(CPUState *cpu, uintptr_t pc);
+ 
++void stop_the_world_lock(CPUState *cpu);
++void stop_the_world_unlock(void);
++void stop_the_world_reset(void);
++void stop_the_world_sleep(void);
++extern __thread bool stw_held;
+ /**
+  * cpu_loop_exit_requested:
+  * @cpu: The CPU state to be tested
+diff --git a/include/qemu/htm.h b/include/qemu/htm.h
+new file mode 100644
+index 0000000..f367ee4
+--- /dev/null
++++ b/include/qemu/htm.h
+@@ -0,0 +1,82 @@
++#ifndef HTM_H
++#define HTM_H
++
++enum htm {
++    HTM_OK,
++    HTM_ABORT_RETRY,
++    HTM_ABORT_NORETRY,
++};
++
++#if defined(__x86_64__)
++/* compile with -mrtm */
++#include <immintrin.h>
++
++static inline enum htm htm_begin(void)
++{
++    int status;
++
++    status = _xbegin();
++    if (unlikely(status != _XBEGIN_STARTED)) {
++        if (status & _XABORT_RETRY) {
++            return HTM_ABORT_RETRY;
++        }
++        return HTM_ABORT_NORETRY;
++    }
++    return HTM_OK;
++}
++
++static inline void htm_end(void)
++{
++    _xend();
++}
++
++static inline bool htm_test(void)
++{
++    return _xtest();
++}
++
++static inline void htm_abort(void)
++{
++    _xabort(0);
++}
++
++#elif defined(__powerpc64__)
++/* compile with -mhtm */
++#include <htmintrin.h>
++
++static inline int htm_begin(void)
++{
++    unsigned int status;
++
++    status = __builtin_tbegin(0);
++    if (likely(status)) {
++        return HTM_OK;
++    }
++    if (_TEXASRU_FAILURE_PERSISTENT(__builtin_get_texasru())) {
++        return HTM_ABORT_NORETRY;
++    }
++    return HTM_ABORT_RETRY;
++}
++
++static inline void htm_end(void)
++{
++    __builtin_tend(0);
++}
++
++static inline int htm_test(void)
++{
++    unsigned char state = _HTM_STATE(__builtin_ttest());
++
++    if (likely(state == _HTM_TRANSACTIONAL)) {
++        return 1;
++    }
++    return 0;
++}
++
++static inline void htm_abort(void)
++{
++    __builtin_tabort(0);
++}
++
++#endif /* ISA */
++#endif /* HTM_H */
+diff --git a/linux-user/exit.c b/linux-user/exit.c
+index d544ade..8b8f66e 100644
+--- a/linux-user/exit.c
++++ b/linux-user/exit.c
+@@ -27,6 +27,8 @@ extern void __gcov_dump(void);
+ #endif
+ 
+ extern int pf_counter;
++extern int ll_count, abort_count;
++
+ void preexit_cleanup(CPUArchState *env, int code)
+ {
+ #ifdef TARGET_GPROF
+@@ -36,6 +38,7 @@ void preexit_cleanup(CPUArchState *env, int code)
+         __gcov_dump();
+ #endif
+ 		fprintf(stderr, "pf_counter : %d\n", pf_counter);
++		fprintf(stderr, "abort count : %d\tll_count : %d\n", abort_count, ll_count);
+         gdb_exit(env, code);
+         qemu_plugin_atexit_cb();
+ }
+diff --git a/linux-user/main.c b/linux-user/main.c
+index 6ff7851..67a5d61 100644
+--- a/linux-user/main.c
++++ b/linux-user/main.c
+@@ -60,6 +60,12 @@ unsigned long mmap_min_addr;
+ unsigned long guest_base;
+ int have_guest_base;
+ 
++static pthread_cond_t stw_sleep_cond   = PTHREAD_COND_INITIALIZER;
++static pthread_cond_t stw_request_cond = PTHREAD_COND_INITIALIZER;
++static pthread_mutex_t stw_lock = PTHREAD_MUTEX_INITIALIZER;
++static int stw_requests;
++static bool stw_ongoing;
++__thread bool stw_held;
+ /*
+  * When running 32-on-64 we should make sure we can fit all of the possible
+  * guest address space into a contiguous chunk of virtual host memory.
+@@ -124,6 +130,7 @@ void fork_start(void)
+     start_exclusive();
+     mmap_fork_start();
+     cpu_list_lock();
++	pthread_mutex_lock(&stw_lock);
+ }
+ 
+ void fork_end(int child)
+@@ -138,17 +145,94 @@ void fork_end(int child)
+                 QTAILQ_REMOVE_RCU(&cpus, cpu, node);
+             }
+         }
++		pthread_mutex_init(&stw_lock, NULL);
++        stw_held = false;
++        stw_ongoing = false;
++		pthread_cond_init(&stw_sleep_cond, NULL);
++        pthread_cond_init(&stw_request_cond, NULL);
+         qemu_init_cpu_list();
+         gdbserver_fork(thread_cpu);
+         /* qemu_init_cpu_list() takes care of reinitializing the
+          * exclusive state, so we don't need to end_exclusive() here.
+          */
+     } else {
++		pthread_mutex_unlock(&stw_lock);
+         cpu_list_unlock();
+         end_exclusive();
+     }
+ }
+ 
++void stop_the_world_lock(CPUState *cpu)
++{
++    CPUState *other;
++
++    if (stw_held) {
++        return;
++    }
++    rcu_read_unlock();
++
++    pthread_mutex_lock(&stw_lock);
++    if (stw_ongoing) {
++        stw_requests++;
++        /* wait for ongoing stops to occur */
++        while (stw_ongoing) {
++            pthread_cond_wait(&stw_request_cond, &stw_lock);
++        }
++        stw_requests--;
++    }
++
++    /* it's our turn! */
++    stw_ongoing = true;
++    stw_held = true;
++    CPU_FOREACH(other) {
++        if (other != cpu) {
++            cpu_exit(other);
++        }
++    }
++    synchronize_rcu();
++}
++
++void stop_the_world_unlock(void)
++{
++    if (!stw_held) {
++        return;
++    }
++    assert(stw_ongoing);
++
++    if (stw_requests) {
++        pthread_cond_signal(&stw_request_cond);
++    } else {
++        pthread_cond_broadcast(&stw_sleep_cond);
++    }
++    /*
++     * Make sure the next STW requester (if any) will perceive that we're
++     * in an RCU read critical section
++     */
++    rcu_read_lock();
++    stw_ongoing = false;
++    stw_held = false;
++    pthread_mutex_unlock(&stw_lock);
++}
++
++void stop_the_world_reset(void)
++{
++    if (likely(!stw_held)) {
++        return;
++    }
++    stop_the_world_unlock();
++}
++
++void stop_the_world_sleep(void)
++{
++    pthread_mutex_lock(&stw_lock);
++    if (unlikely(stw_ongoing)) {
++        while (stw_ongoing) {
++            pthread_cond_wait(&stw_sleep_cond, &stw_lock);
++        }
++    }
++    pthread_mutex_unlock(&stw_lock);
++}
++
+ __thread CPUState *thread_cpu;
+ 
+ bool qemu_cpu_is_self(CPUState *cpu)
+diff --git a/linux-user/syscall.c b/linux-user/syscall.c
+index 171c0ca..af53dbe 100644
+--- a/linux-user/syscall.c
++++ b/linux-user/syscall.c
+@@ -5778,6 +5778,7 @@ static void *clone_func(void *arg)
+     /* Wait until the parent has finished initializing the tls state.  */
+     pthread_mutex_lock(&clone_lock);
+     pthread_mutex_unlock(&clone_lock);
++	stw_held = false;
+     cpu_loop(env);
+     /* never exits */
+     return NULL;
+diff --git a/target/arm/helper-a64.c b/target/arm/helper-a64.c
+index b4cd680..16f2c16 100644
+--- a/target/arm/helper-a64.c
++++ b/target/arm/helper-a64.c
+@@ -27,6 +27,7 @@
+ #include "qemu/bitops.h"
+ #include "internals.h"
+ #include "qemu/crc32c.h"
++#include "qemu/htm.h"
+ #include "exec/exec-all.h"
+ #include "exec/cpu_ldst.h"
+ #include "qemu/int128.h"
+@@ -1086,4 +1087,32 @@ uint32_t HELPER(sqrt_f16)(uint32_t a, void *fpstp)
+     return float16_sqrt(a, s);
+ }
+ 
++void HELPER(xbegin)(CPUARMState *env)
++{
++    int status;
++    int retries = 100;
++
++ retry:
++    status = htm_begin();
++    if (unlikely(status != HTM_OK)) {
++        if ((status & HTM_ABORT_RETRY) && retries) {
++            retries--;
++            goto retry;
++        }
++        stop_the_world_lock(env_cpu(env));
++    }
++}
+ 
++void HELPER(xend)(void)
++{
++    if (likely(htm_test())) {
++        htm_end();
++    } else {
++        stop_the_world_unlock();
++    }
++}
++
++uint64_t HELPER(x_ok)(void)
++{
++    return likely(htm_test()) || stw_held;
++}
+diff --git a/target/arm/helper-a64.h b/target/arm/helper-a64.h
+index a915c12..eb6a373 100644
+--- a/target/arm/helper-a64.h
++++ b/target/arm/helper-a64.h
+@@ -102,3 +102,6 @@ DEF_HELPER_FLAGS_3(autda, TCG_CALL_NO_WG, i64, env, i64, i64)
+ DEF_HELPER_FLAGS_3(autdb, TCG_CALL_NO_WG, i64, env, i64, i64)
+ DEF_HELPER_FLAGS_2(xpaci, TCG_CALL_NO_RWG_SE, i64, env, i64)
+ DEF_HELPER_FLAGS_2(xpacd, TCG_CALL_NO_RWG_SE, i64, env, i64)
++DEF_HELPER_1(xbegin, void, env)
++DEF_HELPER_0(x_ok, i64)
++DEF_HELPER_0(xend, void)
+diff --git a/target/arm/helper.h b/target/arm/helper.h
+index 3d4ec26..990c4dd 100644
+--- a/target/arm/helper.h
++++ b/target/arm/helper.h
+@@ -694,6 +694,10 @@ DEF_HELPER_FLAGS_2(frint64_s, TCG_CALL_NO_RWG, f32, f32, ptr)
+ DEF_HELPER_FLAGS_2(frint32_d, TCG_CALL_NO_RWG, f64, f64, ptr)
+ DEF_HELPER_FLAGS_2(frint64_d, TCG_CALL_NO_RWG, f64, f64, ptr)
+ 
++DEF_HELPER_1(xbegin, void, env)
++DEF_HELPER_0(x_ok, i32)
++DEF_HELPER_0(xend, void)
++
+ #ifdef TARGET_AARCH64
+ #include "helper-a64.h"
+ #include "helper-sve.h"
+diff --git a/target/arm/op_helper.c b/target/arm/op_helper.c
+index b529d6c..f993bb7 100644
+--- a/target/arm/op_helper.c
++++ b/target/arm/op_helper.c
+@@ -20,6 +20,7 @@
+ #include "qemu/units.h"
+ #include "qemu/log.h"
+ #include "qemu/main-loop.h"
++#include "qemu/htm.h"
+ #include "cpu.h"
+ #include "exec/helper-proto.h"
+ #include "internals.h"
+@@ -59,6 +60,8 @@ void raise_exception(CPUARMState *env, uint32_t excp,
+                      uint32_t syndrome, uint32_t target_el)
+ {
+     CPUState *cs = do_raise_exception(env, excp, syndrome, target_el);
++	if(unlikely(htm_test()))
++		htm_end();
+     cpu_loop_exit(cs);
+ }
+ 
+@@ -991,3 +994,39 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
+     memset(g2h(vaddr), 0, blocklen);
+ #endif
+ }
++
++int ll_count = 0;
++int abort_count = 0;
++
++void HELPER(xbegin)(CPUARMState *env)
++{
++    int status;
++    int retries = 100;
++	__sync_fetch_and_add(&ll_count, 1);
++
++ retry:
++    status = htm_begin();
++    if (unlikely(status != HTM_OK)) {
++        if ((status & HTM_ABORT_RETRY) && retries) {
++            retries--;
++            goto retry;
++        }
++        //stop_the_world_lock(env_cpu(env));
++		env->exclusive_addr = -1;
++		__sync_fetch_and_add(&abort_count, 1);
++    }
++}
++
++void HELPER(xend)(void)
++{
++    if (likely(htm_test())) {
++        htm_end();
++    } else {
++        //stop_the_world_unlock();
++    }
++}
++
++uint32_t HELPER(x_ok)(void)
++{
++    return likely(htm_test()) || stw_held;
++}
+diff --git a/target/arm/translate-a64.c b/target/arm/translate-a64.c
+index d4bebbe..cd790b0 100644
+--- a/target/arm/translate-a64.c
++++ b/target/arm/translate-a64.c
+@@ -2194,12 +2194,15 @@ static void disas_b_exc_sys(DisasContext *s, uint32_t insn)
+  * races in multi-threaded linux-user and when MTTCG softmmu is
+  * enabled.
+  */
++#define _HTM
+ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
+                                TCGv_i64 addr, int size, bool is_pair)
+ {
+     int idx = get_mem_index(s);
+     MemOp memop = s->be_data;
+-
++#ifdef _HTM	
++	gen_helper_xbegin(cpu_env);
++#endif
+     g_assert(size <= 3);
+     if (is_pair) {
+         g_assert(size >= 2);
+@@ -2257,8 +2260,13 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
+     TCGv_i64 tmp;
+ 
+     tcg_gen_brcond_i64(TCG_COND_NE, addr, cpu_exclusive_addr, fail_label);
+-
+     tmp = tcg_temp_new_i64();
++
++#ifdef _HTM
++	gen_helper_x_ok(tmp);
++	tcg_gen_brcondi_i64(TCG_COND_EQ, tmp, 0, fail_label);
++#endif
++
+     if (is_pair) {
+         if (size == 2) {
+             if (s->be_data == MO_LE) {
+@@ -2294,12 +2302,21 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
+                                            cpu_reg(s, rt), cpu_reg(s, rt2));
+         }
+     } else {
++#ifdef _HTM
++	//tcg_gen_qemu_st_i64(cpu_reg(s, rt), addr, get_mem_index(s), s->be_data + size);
++//#else
+         tcg_gen_atomic_cmpxchg_i64(tmp, cpu_exclusive_addr, cpu_exclusive_val,
+                                    cpu_reg(s, rt), get_mem_index(s),
+                                    size | MO_ALIGN | s->be_data);
+         tcg_gen_setcond_i64(TCG_COND_NE, tmp, tmp, cpu_exclusive_val);
++#endif
+     }
++#ifdef _HTM
++	tcg_gen_movi_i64(cpu_reg(s, rd), 0);
++	gen_helper_xend();
++#else
+     tcg_gen_mov_i64(cpu_reg(s, rd), tmp);
++#endif
+     tcg_temp_free_i64(tmp);
+     tcg_gen_br(done_label);
+ 
+diff --git a/target/arm/translate.c b/target/arm/translate.c
+index 4d5d4bd..f162418 100644
+--- a/target/arm/translate.c
++++ b/target/arm/translate.c
+@@ -7164,6 +7164,7 @@ static void gen_logicq_cc(TCGv_i32 lo, TCGv_i32 hi)
+    the architecturally mandated semantics, and avoids having to monitor
+    regular stores.  The compare vs the remembered value is done during
+    the cmpxchg operation, but we must compare the addresses manually.  */
++#define _HTM
+ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
+                                TCGv_i32 addr, int size)
+ {
+@@ -7171,6 +7172,9 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
+     MemOp opc = size | MO_ALIGN | s->be_data;
+ 
+     s->is_ldex = true;
++#ifdef _HTM
++	gen_helper_xbegin(cpu_env);
++#endif
+ 
+     if (size == 3) {
+         TCGv_i32 tmp2 = tcg_temp_new_i32();
+@@ -7236,6 +7240,12 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
+     tcg_gen_extu_i32_i64(extaddr, addr);
+     tcg_gen_brcond_i64(TCG_COND_NE, extaddr, cpu_exclusive_addr, fail_label);
+     tcg_temp_free_i64(extaddr);
++#ifdef _HTM
++	//TCGv_i32 tmp = tcg_temp_new_i32();
++    /* strex without a prior ldrex should just fail */
++    //gen_helper_x_ok(tmp);
++    //tcg_gen_brcondi_i32(TCG_COND_EQ, tmp, 0, fail_label);
++#endif	
+ 
+     taddr = gen_aa32_addr(s, addr, opc);
+     t0 = tcg_temp_new_i32();
+@@ -7270,15 +7280,24 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
+ 
+         tcg_temp_free_i64(o64);
+     } else {
+-        t2 = tcg_temp_new_i32();
+-        tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
++#ifdef _HTM
++		tcg_gen_qemu_st_i32(t1, taddr, get_mem_index(s) , opc);
++#else
++		t2 = tcg_temp_new_i32();
++		tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
+         tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
+         tcg_gen_setcond_i32(TCG_COND_NE, t0, t0, t2);
+         tcg_temp_free_i32(t2);
++#endif
+     }
+     tcg_temp_free_i32(t1);
+     tcg_temp_free(taddr);
++#ifdef _HTM
++	tcg_gen_movi_i32(cpu_R[rd], 0);
++    gen_helper_xend();
++#else
+     tcg_gen_mov_i32(cpu_R[rd], t0);
++#endif
+     tcg_temp_free_i32(t0);
+     tcg_gen_br(done_label);
+ 

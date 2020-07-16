@@ -27,12 +27,11 @@
 static struct bt_entry bt_buf[STACK_BUF_ENTRIES];
 
 /* Dumps backtrace to buffer */
-void __nomcount ___backtrace(struct bt_entry *entries, unsigned int *count,
-				unsigned long r1,
-				unsigned long *token, unsigned long *r1_caller)
+void __nomcount backtrace_create(struct bt_entry *entries,
+				 unsigned int max_ents,
+				 struct bt_metadata *metadata)
 {
-	unsigned int room = *count;
-	unsigned long *fp = (unsigned long *)r1;
+	unsigned long *fp = __builtin_frame_address(0);
 	unsigned long top_adj = top_of_ram;
 	struct stack_frame *eframe = (struct stack_frame *)fp;
 
@@ -40,8 +39,8 @@ void __nomcount ___backtrace(struct bt_entry *entries, unsigned int *count,
 	if (top_of_ram == SKIBOOT_BASE + SKIBOOT_SIZE)
 		top_adj = top_of_ram + STACK_SIZE;
 
-	*count = 0;
-	while(room) {
+	metadata->ents = 0;
+	while (max_ents) {
 		fp = (unsigned long *)fp[0];
 		if (!fp || (unsigned long)fp > top_adj)
 			break;
@@ -49,22 +48,22 @@ void __nomcount ___backtrace(struct bt_entry *entries, unsigned int *count,
 		entries->sp = (unsigned long)fp;
 		entries->pc = fp[2];
 		entries++;
-		*count = (*count) + 1;
-		room--;
+		metadata->ents++;
+		max_ents--;
 	}
 
-	*r1_caller = eframe->gpr[1];
+	metadata->r1_caller = eframe->gpr[1];
 
 	if (fp)
-		*token = eframe->gpr[0];
+		metadata->token = eframe->gpr[0];
 	else
-		*token = -1UL;
+		metadata->token = -1UL;
+
+	metadata->pir = mfspr(SPR_PIR);
 }
 
-void ___print_backtrace(unsigned int pir, struct bt_entry *entries,
-			      unsigned int count, unsigned long token,
-			      unsigned long r1_caller, char *out_buf,
-			      unsigned int *len, bool symbols)
+void backtrace_print(struct bt_entry *entries, struct bt_metadata *metadata,
+		     char *out_buf, unsigned int *len, bool symbols)
 {
 	static char bt_text_buf[4096];
 	int i, l = 0, max;
@@ -78,14 +77,14 @@ void ___print_backtrace(unsigned int pir, struct bt_entry *entries,
 	} else
 		max = *len - 1;
 
-	bottom = cpu_stack_bottom(pir);
-	normal_top = cpu_stack_top(pir);
-	top = cpu_emergency_stack_top(pir);
+	bottom = cpu_stack_bottom(metadata->pir);
+	normal_top = cpu_stack_top(metadata->pir);
+	top = cpu_emergency_stack_top(metadata->pir);
 	tbot = SKIBOOT_BASE;
 	ttop = (unsigned long)&_etext;
 
-	l += snprintf(buf, max, "CPU %04x Backtrace:\n", pir);
-	for (i = 0; i < count && l < max; i++) {
+	l += snprintf(buf, max, "CPU %04lx Backtrace:\n", metadata->pir);
+	for (i = 0; i < metadata->ents && l < max; i++) {
 		if (entries->sp < bottom || entries->sp > top)
 			mark = '!';
 		else if (entries->sp > normal_top)
@@ -102,9 +101,11 @@ void ___print_backtrace(unsigned int pir, struct bt_entry *entries,
 		l += snprintf(buf + l, max - l, "\n");
 		entries++;
 	}
-	if (token <= OPAL_LAST)
-		l += snprintf(buf + l, max - l, " --- OPAL call token: 0x%lx caller R1: 0x%016lx ---\n", token, r1_caller);
-	else if (token == -1UL)
+	if (metadata->token <= OPAL_LAST)
+		l += snprintf(buf + l, max - l,
+			      " --- OPAL call token: 0x%lx caller R1: 0x%016lx ---\n",
+			      metadata->token, metadata->r1_caller);
+	else if (metadata->token == -1UL)
 		l += snprintf(buf + l, max - l, " --- OPAL boot ---\n");
 	if (!out_buf)
 		write(stdout->fd, bt_text_buf, l);
@@ -119,19 +120,16 @@ void ___print_backtrace(unsigned int pir, struct bt_entry *entries,
  * a backtrace they garble each other. To prevent this we use a seperate
  * lock to serialise printing of the dumps.
  */
-struct lock bt_lock = LOCK_UNLOCKED;
+static struct lock bt_lock = LOCK_UNLOCKED;
 
 void backtrace(void)
 {
-	unsigned int ents = STACK_BUF_ENTRIES;
-	unsigned long token, r1_caller;
+	struct bt_metadata metadata;
 
 	lock(&bt_lock);
 
-	___backtrace(bt_buf, &ents, (unsigned long)__builtin_frame_address(0),
-			&token, &r1_caller);
-	___print_backtrace(mfspr(SPR_PIR), bt_buf, ents, token, r1_caller,
-			NULL, NULL, true);
+	backtrace_create(bt_buf, STACK_BUF_ENTRIES, &metadata);
+	backtrace_print(bt_buf, &metadata, NULL, NULL, true);
 
 	unlock(&bt_lock);
 }
@@ -178,13 +176,12 @@ void __nomcount __mcount_stack_check(uint64_t sp, uint64_t lr)
 
 	/* Capture lowest stack for this thread */
 	if (mark < c->stack_bot_mark) {
-		unsigned int count = CPU_BACKTRACE_SIZE;
 		lock(&stack_check_lock);
 		c->stack_bot_mark = mark;
 		c->stack_bot_pc = lr;
 		c->stack_bot_tok = c->current_token;
-		__backtrace(c->stack_bot_bt, &count);
-		c->stack_bot_bt_count = count;
+		backtrace_create(c->stack_bot_bt, CPU_BACKTRACE_SIZE,
+				 &c->stack_bot_bt_metadata);
 		unlock(&stack_check_lock);
 	}
 
@@ -235,8 +232,9 @@ void check_stacks(void)
 		      " pc=%08llx token=%lld\n",
 		      lowest->pir, lowest->stack_bot_mark, lowest->stack_bot_pc,
 		      lowest->stack_bot_tok);
-		__print_backtrace(lowest->pir, lowest->stack_bot_bt,
-				  lowest->stack_bot_bt_count, NULL, NULL, true);
+		backtrace_print(lowest->stack_bot_bt,
+				&lowest->stack_bot_bt_metadata,
+				NULL, NULL, true);
 		unlock(&stack_check_lock);
 	}
 

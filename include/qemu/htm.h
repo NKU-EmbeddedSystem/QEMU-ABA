@@ -80,4 +80,3 @@ static inline void htm_abort(void)
 
 #endif /* ISA */
 #endif /* HTM_H */
-

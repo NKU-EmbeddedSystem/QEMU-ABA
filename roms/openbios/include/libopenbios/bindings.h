@@ -108,17 +108,6 @@ typedef struct {
 	void		*func;
 } method_t;
 
-#define REGISTER_NAMED_NODE( name, path )   do { \
-	bind_new_node( name##_flags_, name##_size_, \
-		path, name##_m, sizeof(name##_m)/sizeof(method_t)); \
-	} while(0)
-
-#define REGISTER_NAMED_NODE_PHANDLE( name, path, phandle )   do { \
-    phandle = \
-    bind_new_node( name##_flags_, name##_size_, \
-        path, name##_m, sizeof(name##_m)/sizeof(method_t)); \
-    } while(0)
-
 #define REGISTER_NODE_METHODS( name, path )   do {			\
 	const char *paths[1];						\
 									\
@@ -126,6 +115,11 @@ typedef struct {
 	bind_node( name##_flags_, name##_size_,				\
 	paths, 1, name##_m, sizeof(name##_m)/sizeof(method_t));		\
     } while(0)
+
+#define BIND_NODE_METHODS(ph, name)   do {	\
+	bind_node_methods(ph, name##_flags_, name##_size_,	\
+	name##_m, sizeof(name##_m)/sizeof(method_t));		\
+} while(0)
 
 #define DECLARE_UNNAMED_NODE( name, flags, size )	\
 static const int name##_flags_ = flags;	\
@@ -143,6 +137,9 @@ static const method_t name##_m[]
 		       name##_p, sizeof(name##_p)/sizeof(char*), \
 		       name##_m, sizeof(name##_m)/sizeof(method_t) ); \
         } while(0)
+
+extern void
+bind_node_methods(phandle_t ph, int flags, int size, const method_t *methods, int nmet);
 
 extern void 	bind_node( int flags, int size, const char * const *paths, int npaths,
 			   const method_t *methods, int nmethods );

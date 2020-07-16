@@ -59,9 +59,16 @@ static int64_t opal_cec_reboot(void)
 
 	opal_quiesce(QUIESCE_HOLD, -1);
 
-	/* Try fast-reset unless explicitly disabled */
-	if (!nvram_query_eq("fast-reset","0"))
+	if (proc_gen == proc_gen_p8 && nvram_query_eq_safe("fast-reset","1")) {
+		/*
+		 * Bugs in P8 mean fast reboot isn't 100% reliable when cores
+		 * are busy, so only attempt if explicitly *enabled*.
+		 */
 		fast_reboot();
+	} else if (!nvram_query_eq_safe("fast-reset","0")) {
+		/* Try fast-reset unless explicitly disabled */
+		fast_reboot();
+	}
 
 	console_complete_flush();
 
@@ -287,4 +294,10 @@ int wait_for_resource_loaded(enum resource_id id, uint32_t idx)
 	prlog(PR_TRACE, "PLATFORM: wait_for_resource_loaded %x/%x %u ms\n",
 	      id, idx, waited);
 	return r;
+}
+
+void op_display(enum op_severity sev, enum op_module mod, uint16_t code)
+{
+	if (platform.op_display)
+		platform.op_display(sev, mod, code);
 }

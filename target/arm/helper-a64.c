@@ -23,10 +23,11 @@
 #include "exec/helper-proto.h"
 #include "qemu/host-utils.h"
 #include "qemu/log.h"
-#include "sysemu/sysemu.h"
+#include "qemu/main-loop.h"
 #include "qemu/bitops.h"
 #include "internals.h"
 #include "qemu/crc32c.h"
+#include "qemu/htm.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "qemu/int128.h"
@@ -1025,6 +1026,7 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         } else {
             env->regs[15] = new_pc & ~0x3;
         }
+        helper_rebuild_hflags_a32(env, new_el);
         qemu_log_mask(CPU_LOG_INT, "Exception return from AArch64 EL%d to "
                       "AArch32 EL%d PC 0x%" PRIx32 "\n",
                       cur_el, new_el, env->regs[15]);
@@ -1036,10 +1038,12 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         }
         aarch64_restore_sp(env, new_el);
         env->pc = new_pc;
+        helper_rebuild_hflags_a64(env, new_el);
         qemu_log_mask(CPU_LOG_INT, "Exception return from AArch64 EL%d to "
                       "AArch64 EL%d PC 0x%" PRIx64 "\n",
                       cur_el, new_el, env->pc);
     }
+
     /*
      * Note that cur_el can never be 0.  If new_el is 0, then
      * el0_a64 is return_to_aa64, else el0_a64 is ignored.
@@ -1083,4 +1087,32 @@ uint32_t HELPER(sqrt_f16)(uint32_t a, void *fpstp)
     return float16_sqrt(a, s);
 }
 
+void HELPER(xbegin)(CPUARMState *env)
+{
+    int status;
+    int retries = 100;
 
+ retry:
+    status = htm_begin();
+    if (unlikely(status != HTM_OK)) {
+        if ((status & HTM_ABORT_RETRY) && retries) {
+            retries--;
+            goto retry;
+        }
+        stop_the_world_lock(env_cpu(env));
+    }
+}
+
+void HELPER(xend)(void)
+{
+    if (likely(htm_test())) {
+        htm_end();
+    } else {
+        stop_the_world_unlock();
+    }
+}
+
+uint64_t HELPER(x_ok)(void)
+{
+    return likely(htm_test()) || stw_held;
+}

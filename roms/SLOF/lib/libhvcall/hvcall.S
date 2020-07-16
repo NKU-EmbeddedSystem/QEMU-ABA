@@ -127,6 +127,36 @@ ENTRY(hv_cas)
 	HVCALL
 	blr
 
+/* This is the actual RTAS blob copied to the OS at instantiate-rtas */
+ENTRY(hv_rtas)
+	mr	r4,r3
+	lis	r3,KVMPPC_H_RTAS@h
+	ori	r3,r3,KVMPPC_H_RTAS@l
+	HVCALL
+	blr
+	/*
+	 * A space reserved for a RTAS log from Firmware Assisted
+	 * Non-Maskable Interrupts Option (FWNMI) feature.
+	 *
+	 * The QEMU implementation uses 0x30..0x800 for the log.
+	 */
+	.space 2048 - (. - hv_rtas)
+	.globl hv_rtas_size
+hv_rtas_size:
+	.long . - hv_rtas;
+
+ENTRY(hv_rtas_broken_sc1)
+	mr	r4,r3
+	lis	r3,KVMPPC_H_RTAS@h
+	ori	r3,r3,KVMPPC_H_RTAS@l
+	.long	0x7c000268
+	blr
+	/* See the FWNMI note above */
+	.space 2048 - (. - hv_rtas_broken_sc1)
+	.globl hv_rtas_broken_sc1_size
+hv_rtas_broken_sc1_size:
+	.long . - hv_rtas_broken_sc1;
+
 	.section ".bss"
 inbuf:	.space	16
 inlen:	.space	4

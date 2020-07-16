@@ -137,6 +137,9 @@ static void phb4_init_hw(struct phb4 *p);
 #define PHBINF(p, fmt, a...)	prlog(PR_INFO, "PHB#%04x[%d:%d]: " fmt, \
 				      (p)->phb.opal_id, (p)->chip_id, \
 				      (p)->index,  ## a)
+#define PHBNOTICE(p, fmt, a...)	prlog(PR_NOTICE, "PHB#%04x[%d:%d]: " fmt, \
+				      (p)->phb.opal_id, (p)->chip_id, \
+				      (p)->index,  ## a)
 #define PHBERR(p, fmt, a...)	prlog(PR_ERR, "PHB#%04x[%d:%d]: " fmt, \
 				      (p)->phb.opal_id, (p)->chip_id, \
 				      (p)->index,  ## a)
@@ -148,7 +151,6 @@ static void phb4_init_hw(struct phb4 *p);
 
 #define PHB4_CAN_STORE_EOI(p) XIVE_STORE_EOI_ENABLED
 
-static bool verbose_eeh;
 static bool pci_tracing;
 static bool pci_eeh_mmio;
 static bool pci_retry_all;
@@ -318,6 +320,14 @@ static int64_t phb4_rc_read(struct phb4 *p, uint32_t offset, uint8_t sz,
 				oval = in_le32(p->regs + PHB_RC_CONFIG_BASE + reg);
 		}
 	}
+
+	/* Apply any post-read fixups */
+	switch (reg) {
+	case PCI_CFG_IO_BASE:
+		oval |= 0x01f1; /* Set IO base < limit to disable the window */
+		break;
+	}
+
 	switch (sz) {
 	case 1:
 		offset &= 3;
@@ -2326,12 +2336,13 @@ static int64_t phb4_retry_state(struct pci_slot *slot)
 	return pci_slot_set_sm_timeout(slot, msecs_to_tb(1));
 }
 
-static void phb4_train_info(struct phb4 *p, uint64_t reg, unsigned long time)
+static uint64_t phb4_train_info(struct phb4 *p, uint64_t reg, unsigned long dt)
 {
+	uint64_t ltssm_state = GETFIELD(PHB_PCIE_DLP_LTSSM_TRC, reg);
 	char s[80];
 
 	snprintf(s, sizeof(s), "TRACE:0x%016llx % 2lims",
-		 reg, tb_to_msecs(time));
+		 reg, tb_to_msecs(dt));
 
 	if (reg & PHB_PCIE_DLP_TL_LINKACT)
 		snprintf(s, sizeof(s), "%s trained ", s);
@@ -2346,7 +2357,7 @@ static void phb4_train_info(struct phb4 *p, uint64_t reg, unsigned long time)
 		 GETFIELD(PHB_PCIE_DLP_LINK_SPEED, reg),
 		 GETFIELD(PHB_PCIE_DLP_LINK_WIDTH, reg));
 
-	switch (GETFIELD(PHB_PCIE_DLP_LTSSM_TRC, reg)) {
+	switch (ltssm_state) {
 	case PHB_PCIE_DLP_LTSSM_RESET:
 		snprintf(s, sizeof(s), "%sreset", s);
 		break;
@@ -2374,10 +2385,18 @@ static void phb4_train_info(struct phb4 *p, uint64_t reg, unsigned long time)
 	case PHB_PCIE_DLP_LTSSM_HOTRESET:
 		snprintf(s, sizeof(s), "%shotreset", s);
 		break;
+	case PHB_PCIE_DLP_LTSSM_DISABLED:
+		snprintf(s, sizeof(s), "%sdisabled", s);
+		break;
+	case PHB_PCIE_DLP_LTSSM_LOOPBACK:
+		snprintf(s, sizeof(s), "%sloopback", s);
+		break;
 	default:
 		snprintf(s, sizeof(s), "%sunvalid", s);
 	}
-	PHBERR(p, "%s\n", s);
+	PHBNOTICE(p, "%s\n", s);
+
+	return ltssm_state;
 }
 
 static void phb4_dump_pec_err_regs(struct phb4 *p)
@@ -2569,6 +2588,7 @@ static void phb4_lane_eq_change(struct phb4 *p, uint32_t vdid)
 }
 
 #define min(x,y) ((x) < (y) ? x : y)
+#define max(x,y) ((x) < (y) ? x : y)
 
 static bool phb4_link_optimal(struct pci_slot *slot, uint32_t *vdid)
 {
@@ -2638,34 +2658,54 @@ static bool phb4_link_optimal(struct pci_slot *slot, uint32_t *vdid)
  * training.  If any errors are detected it simply returns so the
  * normal code can deal with it.
  */
-static void phb4_training_trace(struct phb4 *p)
+static void phb4_link_trace(struct phb4 *p, uint64_t target_state, int max_ms)
 {
-	uint64_t reg, reglast = -1;
-	unsigned long now, start = mftb();
+	unsigned long now, end, start = mftb(), state = 0;
+	uint64_t trwctl, reg, reglast = -1;
+	bool enabled;
 
-	if (!pci_tracing)
-		return;
+	/*
+	 * Enable the DLP trace outputs. If we don't the LTSSM state in
+	 * PHB_PCIE_DLP_TRAIN_CTL won't be updated and always reads zero.
+	 */
+	trwctl = phb4_read_reg(p, PHB_PCIE_DLP_TRWCTL);
+	enabled = !!(trwctl & PHB_PCIE_DLP_TRWCTL_EN);
+	if (!enabled) {
+		phb4_write_reg(p, PHB_PCIE_DLP_TRWCTL,
+				trwctl | PHB_PCIE_DLP_TRWCTL_EN);
+	}
 
-	while(1) {
-		now = mftb();
+	end = start + msecs_to_tb(max_ms);
+	now = start;
+
+	do {
 		reg = in_be64(p->regs + PHB_PCIE_DLP_TRAIN_CTL);
 		if (reg != reglast)
-			phb4_train_info(p, reg, now - start);
+			state = phb4_train_info(p, reg, now - start);
 		reglast = reg;
 
 		if (!phb4_check_reg(p, reg)) {
-			PHBERR(p, "TRACE: PHB fence waiting link.\n");
-			break;
+			PHBNOTICE(p, "TRACE: PHB fenced.\n");
+			goto out;
 		}
-		if (reg & PHB_PCIE_DLP_TL_LINKACT) {
-			PHBERR(p, "TRACE: Link trained.\n");
-			break;
+
+		if (tb_compare(now, end) == TB_AAFTERB) {
+			PHBNOTICE(p, "TRACE: Timed out after %dms\n", max_ms);
+			goto out;
 		}
-		if ((now - start) > secs_to_tb(3)) {
-			PHBERR(p, "TRACE: Timeout waiting for link up.\n");
-			break;
-		}
-	}
+
+		now = mftb();
+	} while (state != target_state);
+
+	PHBNOTICE(p, "TRACE: Reached target state\n");
+
+out:
+	/*
+	 * The trace enable bit is a clock gate for the tracing logic. Turn
+	 * it off to save power if we're not using it otherwise.
+	 */
+	if (!enabled)
+		phb4_write_reg(p, PHB_PCIE_DLP_TRWCTL, trwctl);
 }
 
 /*
@@ -2869,6 +2909,34 @@ static unsigned int phb4_get_max_link_speed(struct phb4 *p, struct dt_node *np)
 	return max_link_speed;
 }
 
+static void phb4_assert_perst(struct pci_slot *slot, bool assert)
+{
+	struct phb4 *p = phb_to_phb4(slot->phb);
+	uint16_t linkctl;
+	uint64_t reg;
+
+	/*
+	 * Disable the link before asserting PERST. The Cursed RAID card
+	 * in ozrom1 (9005:028c) has problems coming back if PERST is asserted
+	 * while link is active. To work around the problem we assert the link
+	 * disable bit before asserting PERST. Asserting the secondary reset
+	 * bit in the btctl register also works.
+	 */
+	phb4_pcicfg_read16(&p->phb, 0, p->ecap + PCICAP_EXP_LCTL, &linkctl);
+	reg = phb4_read_reg(p, PHB_PCIE_CRESET);
+
+	if (assert) {
+		linkctl |= PCICAP_EXP_LCTL_LINK_DIS;
+		reg &= ~PHB_PCIE_CRESET_PERST_N;
+	} else {
+		linkctl &= ~PCICAP_EXP_LCTL_LINK_DIS;
+		reg |= PHB_PCIE_CRESET_PERST_N;
+	}
+
+	phb4_write_reg(p, PHB_PCIE_CRESET, reg);
+	phb4_pcicfg_write16(&p->phb, 0, p->ecap + PCICAP_EXP_LCTL, linkctl);
+}
+
 static int64_t phb4_hreset(struct pci_slot *slot)
 {
 	struct phb4 *p = phb_to_phb4(slot->phb);
@@ -2930,43 +2998,23 @@ static int64_t phb4_hreset(struct pci_slot *slot)
 static int64_t phb4_freset(struct pci_slot *slot)
 {
 	struct phb4 *p = phb_to_phb4(slot->phb);
-	uint8_t presence = 1;
-	uint64_t reg;
-	uint16_t reg16;
 
 	switch(slot->state) {
 	case PHB4_SLOT_NORMAL:
+	case PHB4_SLOT_FRESET_START:
 		PHBDBG(p, "FRESET: Starts\n");
 
 		/* Reset max link speed for training */
 		p->max_link_speed = phb4_get_max_link_speed(p, NULL);
 
-		/* Nothing to do without adapter connected */
-		if (slot->ops.get_presence_state)
-			slot->ops.get_presence_state(slot, &presence);
-		if (!presence) {
-			PHBDBG(p, "FRESET: No device\n");
-			return OPAL_SUCCESS;
-		}
-
 		PHBDBG(p, "FRESET: Prepare for link down\n");
-
 		phb4_prepare_link_change(slot, false);
-		/* fall through */
-	case PHB4_SLOT_FRESET_START:
-		phb4_pcicfg_read16(&p->phb, 0, p->ecap + PCICAP_EXP_LCTL,
-				   &reg16);
-		reg16 |= PCICAP_EXP_LCTL_LINK_DIS;
-		phb4_pcicfg_write16(&p->phb, 0, p->ecap + PCICAP_EXP_LCTL,
-				    reg16);
 
 		if (!p->skip_perst) {
 			PHBDBG(p, "FRESET: Assert\n");
-			reg = in_be64(p->regs + PHB_PCIE_CRESET);
-			reg &= ~PHB_PCIE_CRESET_PERST_N;
-			out_be64(p->regs + PHB_PCIE_CRESET, reg);
-			pci_slot_set_state(slot,
-				PHB4_SLOT_FRESET_ASSERT_DELAY);
+			phb4_assert_perst(slot, true);
+			pci_slot_set_state(slot, PHB4_SLOT_FRESET_ASSERT_DELAY);
+
 			/* 250ms assert time aligns with powernv */
 			return pci_slot_set_sm_timeout(slot, msecs_to_tb(250));
 		}
@@ -2980,31 +3028,11 @@ static int64_t phb4_freset(struct pci_slot *slot)
 		/* Clear link errors before we deassert PERST */
 		phb4_err_clear_regb(p);
 
-		if (pci_tracing) {
-			/* Enable tracing */
-			reg = in_be64(p->regs + PHB_PCIE_DLP_TRWCTL);
-			out_be64(p->regs + PHB_PCIE_DLP_TRWCTL,
-				 reg | PHB_PCIE_DLP_TRWCTL_EN);
-		}
-
 		PHBDBG(p, "FRESET: Deassert\n");
-		reg = in_be64(p->regs + PHB_PCIE_CRESET);
-		reg |= PHB_PCIE_CRESET_PERST_N;
-		out_be64(p->regs + PHB_PCIE_CRESET, reg);
-		pci_slot_set_state(slot,
-			PHB4_SLOT_FRESET_DEASSERT_DELAY);
+		phb4_assert_perst(slot, false);
 
-		/* Move on to link poll right away */
-		return pci_slot_set_sm_timeout(slot, 1);
-	case PHB4_SLOT_FRESET_DEASSERT_DELAY:
-		PHBDBG(p, "FRESET: Starting training\n");
-		phb4_pcicfg_read16(&p->phb, 0, p->ecap + PCICAP_EXP_LCTL,
-				   &reg16);
-		reg16 &= ~(PCICAP_EXP_LCTL_LINK_DIS);
-		phb4_pcicfg_write16(&p->phb, 0, p->ecap + PCICAP_EXP_LCTL,
-				    reg16);
-
-		phb4_training_trace(p);
+		if (pci_tracing)
+			phb4_link_trace(p, PHB_PCIE_DLP_LTSSM_L0, 3000);
 
 		pci_slot_set_state(slot, PHB4_SLOT_LINK_START);
 		return slot->ops.poll_link(slot);
@@ -3221,7 +3249,8 @@ static int64_t phb4_creset(struct pci_slot *slot)
 {
 	struct phb4 *p = phb_to_phb4(slot->phb);
 	struct capp *capp = p->capp;
-	uint64_t pbcq_status, reg;
+	uint64_t pbcq_status;
+	uint64_t creset_time, wait_time;
 
 	/* Don't even try fixing a broken PHB */
 	if (p->broken)
@@ -3231,6 +3260,8 @@ static int64_t phb4_creset(struct pci_slot *slot)
 	case PHB4_SLOT_NORMAL:
 	case PHB4_SLOT_CRESET_START:
 		PHBDBG(p, "CRESET: Starts\n");
+
+		p->creset_start_time = mftb();
 
 		phb4_prepare_link_change(slot, false);
 		/* Clear error inject register, preventing recursive errors */
@@ -3258,9 +3289,7 @@ static int64_t phb4_creset(struct pci_slot *slot)
 		p->flags |= PHB4_CFG_USE_ASB | PHB4_AIB_FENCED;
 
 		/* Assert PREST before clearing errors */
-		reg = phb4_read_reg(p, PHB_PCIE_CRESET);
-		reg &= ~PHB_PCIE_CRESET_PERST_N;
-		phb4_write_reg(p, PHB_PCIE_CRESET, reg);
+		phb4_assert_perst(slot, true);
 
 		/* Clear errors, following the proper sequence */
 		phb4_err_clear(p);
@@ -3337,8 +3366,32 @@ static int64_t phb4_creset(struct pci_slot *slot)
 		p->flags &= ~PHB4_CFG_USE_ASB;
 		phb4_init_hw(p);
 		pci_slot_set_state(slot, PHB4_SLOT_CRESET_FRESET);
-		return pci_slot_set_sm_timeout(slot, msecs_to_tb(100));
+
+		/*
+		 * The PERST is sticky across resets, but LINK_DIS isn't.
+		 * Re-assert it here now that we've reset the PHB.
+		 */
+		phb4_assert_perst(slot, true);
+
+		/*
+		 * wait either 100ms (for the ETU logic) or until we've had
+		 * PERST asserted for 250ms.
+		 */
+		creset_time = tb_to_msecs(mftb() - p->creset_start_time);
+		if (creset_time < 250)
+			wait_time = max(100, 250 - creset_time);
+		else
+			wait_time = 100;
+		PHBDBG(p, "CRESET: wait_time = %lld\n", wait_time);
+		return pci_slot_set_sm_timeout(slot, msecs_to_tb(wait_time));
+
 	case PHB4_SLOT_CRESET_FRESET:
+		/*
+		 * We asserted PERST at the beginning of the CRESET and we
+		 * have waited long enough, so we can skip it in the freset
+		 * procedure.
+		 */
+		p->skip_perst = true;
 		pci_slot_set_state(slot, PHB4_SLOT_NORMAL);
 		return slot->ops.freset(slot);
 	default:
@@ -4771,7 +4824,6 @@ static const struct phb_ops phb4_ops = {
 	.eeh_freeze_set		= phb4_eeh_freeze_set,
 	.next_error		= phb4_eeh_next_error,
 	.err_inject		= phb4_err_inject,
-	.get_diag_data		= NULL,
 	.get_diag_data2		= phb4_get_diag_data,
 	.tce_kill		= phb4_tce_kill,
 	.set_capi_mode		= phb4_set_capi_mode,
@@ -5499,10 +5551,10 @@ static uint64_t phb4_lsi_attributes(struct irq_source *is __unused,
 				uint32_t isn __unused)
 {
 #ifndef DISABLE_ERR_INTS
-	struct phb3 *p = is->data;
+	struct phb4 *p = is->data;
 	uint32_t idx = isn - p->base_lsi;
 
-	if (idx == PHB3_LSI_PCIE_INF || idx == PHB3_LSI_PCIE_ER)
+	if (idx == PHB4_LSI_PCIE_INF || idx == PHB4_LSI_PCIE_ER)
 		return IRQ_ATTR_TARGET_OPAL | IRQ_ATTR_TARGET_RARE | IRQ_ATTR_TYPE_LSI;
 #endif
 	return IRQ_ATTR_TARGET_LINUX;
@@ -5619,7 +5671,8 @@ static void phb4_create(struct dt_node *np)
 	prop = dt_find_property(dt_root, "ibm,io-vpd");
 	if (!prop) {
 		/* LX VPD Lid not already loaded */
-		vpd_iohub_load(dt_root);
+		if (platform.vpd_iohub_load)
+			platform.vpd_iohub_load(dt_root);
 	}
 
 	/* Obtain informatin about the PHB from the hardware directly */
@@ -5842,11 +5895,17 @@ static void phb4_probe_stack(struct dt_node *stk_node, uint32_t pec_index,
 	dt_add_property_cells(np, "ibm,phb-stack", stk_node->phandle);
 	dt_add_property_cells(np, "ibm,phb-stack-index", stk_index);
 	dt_add_property_cells(np, "ibm,chip-id", gcid);
-	if (dt_has_node_property(stk_node, "ibm,hub-id", NULL))
-		dt_add_property_cells(np, "ibm,hub-id",
-				      dt_prop_get_u32(stk_node, "ibm,hub-id"));
-	if (dt_has_node_property(stk_node, "ibm,loc-code", NULL)) {
-		const char *lc = dt_prop_get(stk_node, "ibm,loc-code");
+
+	/* read the hub-id out of the pbcq node */
+	if (dt_has_node_property(stk_node->parent, "ibm,hub-id", NULL)) {
+		uint32_t hub_id;
+
+		hub_id = dt_prop_get_u32(stk_node->parent, "ibm,hub-id");
+		dt_add_property_cells(np, "ibm,hub-id", hub_id);
+	}
+
+	if (dt_has_node_property(stk_node->parent, "ibm,loc-code", NULL)) {
+		const char *lc = dt_prop_get(stk_node->parent, "ibm,loc-code");
 		dt_add_property_string(np, "ibm,loc-code", lc);
 	}
 	if (dt_has_node_property(stk_node, "ibm,lane-eq", NULL)) {
@@ -5875,6 +5934,9 @@ static void phb4_probe_pbcq(struct dt_node *pbcq)
 	uint32_t nest_base, pci_base, pec_index;
 	struct dt_node *stk;
 
+	/* REMOVEME: force this for now until we stabalise PCIe */
+	verbose_eeh = 1;
+
 	nest_base = dt_get_address(pbcq, 0, NULL);
 	pci_base = dt_get_address(pbcq, 1, NULL);
 	pec_index = dt_prop_get_u32(pbcq, "ibm,pec-index");
@@ -5890,16 +5952,10 @@ void probe_phb4(void)
 	struct dt_node *np;
 	const char *s;
 
-	verbose_eeh = nvram_query_eq("pci-eeh-verbose", "true");
-	/* REMOVEME: force this for now until we stabalise PCIe */
-	verbose_eeh = 1;
-	if (verbose_eeh)
-		prlog(PR_INFO, "PHB4: Verbose EEH enabled\n");
-
-	pci_tracing = nvram_query_eq("pci-tracing", "true");
-	pci_eeh_mmio = !nvram_query_eq("pci-eeh-mmio", "disabled");
-	pci_retry_all = nvram_query_eq("pci-retry-all", "true");
-	s = nvram_query("phb-rx-err-max");
+	pci_tracing = nvram_query_eq_safe("pci-tracing", "true");
+	pci_eeh_mmio = !nvram_query_eq_dangerous("pci-eeh-mmio", "disabled");
+	pci_retry_all = nvram_query_eq_dangerous("pci-retry-all", "true");
+	s = nvram_query_dangerous("phb-rx-err-max");
 	if (s) {
 		rx_err_max = atoi(s);
 
@@ -5908,7 +5964,6 @@ void probe_phb4(void)
 		rx_err_max = MIN(rx_err_max, 255);
 	}
 	prlog(PR_DEBUG, "PHB4: Maximum RX errors during training: %d\n", rx_err_max);
-
 	/* Look for PBCQ XSCOM nodes */
 	dt_for_each_compatible(dt_root, np, "ibm,power9-pbcq")
 		phb4_probe_pbcq(np);

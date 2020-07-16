@@ -19,6 +19,8 @@
  */
 #include <skiboot.h>
 #include <xscom.h>
+#include <xscom-p8-regs.h>
+#include <xscom-p9-regs.h>
 #include <io.h>
 #include <cpu.h>
 #include <chip.h>
@@ -382,7 +384,7 @@ struct cpu_idle_states {
 	u32 flags;
 };
 
-static struct cpu_idle_states power7_cpu_idle_states[] = {
+static struct cpu_idle_states nap_only_cpu_idle_states[] = {
 	{ /* nap */
 		.name = "nap",
 		.latency_ns = 4000,
@@ -841,8 +843,8 @@ void add_cpu_idle_state_properties(void)
 		}
 
 	} else {
-		states = power7_cpu_idle_states;
-		nr_states = ARRAY_SIZE(power7_cpu_idle_states);
+		states = nap_only_cpu_idle_states;
+		nr_states = ARRAY_SIZE(nap_only_cpu_idle_states);
 	}
 
 
@@ -883,7 +885,7 @@ void add_cpu_idle_state_properties(void)
 		if (wakeup_engine_state == WAKEUP_ENGINE_PRESENT)
 			supported_states_mask |= OPAL_PM_WINKLE_ENABLED;
 	}
-	nvram_disable_str = nvram_query("opal-stop-state-disable-mask");
+	nvram_disable_str = nvram_query_dangerous("opal-stop-state-disable-mask");
 	if (nvram_disable_str)
 		nvram_disabled_states_mask = strtol(nvram_disable_str, NULL, 0);
 	prlog(PR_DEBUG, "NVRAM stop disable mask: %x\n", nvram_disabled_states_mask);

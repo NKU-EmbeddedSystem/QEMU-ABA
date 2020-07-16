@@ -1,4 +1,4 @@
-/* Copyright 2013-2014 IBM Corp.
+/* Copyright 2013-2019 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,13 +27,21 @@
  */
 #define OPAL_MAX_ASYNC_COMP	16
 
+/* Max size of struct opal_msg */
+#define OPAL_MSG_SIZE		(64 * 1024)
+
+/* opal_msg fixed parameters size */
+#define OPAL_MSG_HDR_SIZE		(offsetof(struct opal_msg, params))
+#define OPAL_MSG_FIXED_PARAMS_SIZE	\
+				(sizeof(struct opal_msg) - OPAL_MSG_HDR_SIZE)
+
 int _opal_queue_msg(enum opal_msg_type msg_type, void *data,
-		    void (*consumed)(void *data), size_t num_params,
-		    const u64 *params);
+		    void (*consumed)(void *data, int status),
+		    size_t params_size, const void *params);
 
 #define opal_queue_msg(msg_type, data, cb, ...) \
 	_opal_queue_msg(msg_type, data, cb, \
-			sizeof((u64[]) {__VA_ARGS__})/sizeof(u64), \
+			sizeof((u64[]) {__VA_ARGS__}), \
 			(u64[]) {__VA_ARGS__});
 
 void opal_init_msg(void);

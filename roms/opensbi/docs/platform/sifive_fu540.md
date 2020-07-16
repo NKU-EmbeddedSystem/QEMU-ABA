@@ -4,6 +4,9 @@ The FU540-C000 is the world’s first 4+1 64-bit RISC-V SoC from SiFive.
 The HiFive Unleashed development platform is based on FU540-C000 and capable
 of running Linux.
 
+With QEMU v4.2 or above release, the 'sifive_u' machine can be used to test
+OpenSBI image built for the real hardware as well.
+
 To build platform specific library and firmwares, provide the
 *PLATFORM=sifive/fu540* parameter to the top level `make` command.
 
@@ -47,11 +50,10 @@ make PLATFORM=sifive/fu540 FW_PAYLOAD_PATH=<linux_build_directory>/arch/riscv/bo
 
 The command-line example here assumes that U-Boot was compiled using the
 sifive_fu540_defconfig configuration and with U-Boot v2019.04 (or higher)
-having SMP support.
+having SMP support. From, Linux v5.2 (or higher) device tree is hosted in
+Linux kernel and compiled as a part of Linux kernel build process.
 
-To use U-Boot which follows Linux v5.2 (or higher) DT bindings, we will
-need custom U-Boot with required driver changes which can be found in
-riscv_unleashed_mmc_spi_v2 branch of https://github.com/avpatel/u-boot.git
+The detailed U-Boot booting guide is avaialble at [U-Boot](https://gitlab.denx.de/u-boot/u-boot/blob/master/doc/board/sifive/fu540.rst)
 
 ```
 make PLATFORM=sifive/fu540 FW_PAYLOAD_PATH=<u-boot_build_dir>/u-boot.bin
@@ -174,8 +176,11 @@ already part of the kernel or loaded from an external storage by kernel.
 ```
 tftpboot ${ramdisk_addr_r} <ramdisk path in tftpboot directory>
 ```
-
-7. Set the boot command-line arguments.
+7. Load the pre-compiled device tree via tftpboot.
+```
+tftpboot ${fdt_addr_r} <linux source>/arch/riscv/boot/dts/sifive/hifive-unleashed-a00.dtb
+```
+8. Set the boot command-line arguments.
 ```
 setenv bootargs "root=<root partition> rw console=ttySIF0 earlycon=sbi"
 ```
@@ -184,12 +189,12 @@ setenv bootargs "root=<root partition> rw console=ttySIF0 earlycon=sbi"
 ** root=/dev/mmcblk0pX ** - If a rootfs is already on some other partition
 of sdcard)
 
-8. Now boot into Linux.
+9. Now boot into Linux.
 ```
-bootm ${kernel_addr_r} ${ramdisk_addr_r} ${fdtcontroladdr}
+bootm ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}
 or
 (If ramdisk is not loaded from network)
-bootm ${kernel_addr_r} - ${fdtcontroladdr}
+bootm ${kernel_addr_r} - ${fdt_addr_r}
 ```
 
 **U-Boot & Linux Kernel as a single payload**
@@ -197,5 +202,14 @@ bootm ${kernel_addr_r} - ${fdtcontroladdr}
 At U-Boot prompt execute the following boot command to boot Linux.
 
 ```
-bootm ${kernel_addr_r} - ${fdtcontroladdr}
+bootm ${kernel_addr_r} - ${fdt_addr_r}
 ```
+
+QEMU Specific Instructions
+--------------------------
+If you want to test OpenSBI with QEMU 'sifive_u' machine, please follow the
+same instructions above, with the exception of not passing FW_PAYLOAD_FDT_PATH.
+
+This is because QEMU generates a device tree blob on the fly based on the
+command line parameters and it's compatible with the one used in the upstream
+Linux kernel.

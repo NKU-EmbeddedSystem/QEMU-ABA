@@ -201,11 +201,29 @@ static uint32_t nop(struct npu2_dev *npu_dev __unused)
 }
 DEFINE_PROCEDURE(nop);
 
-/* Return the brick number (0-2) within an obus chiplet */
+/*
+ * Return the obus (0 or 1) of a device
+ *
+ * Using the brick index is dangerous, because it varies for a link
+ * depending on the mode (opencapi or nvlink)
+ */
+static int obus_index(struct npu2_dev *ndev)
+{
+	if ((ndev->pl_xscom_base & 0x3F000000) == 0x09000000)
+		return 0;
+	else
+		return 1;
+}
+
+/*
+ * Return the brick number (0-2) within an obus chiplet.
+ * Only valid for nvlink devices
+ */
 static int obus_brick_index(struct npu2_dev *ndev)
 {
 	int index = ndev->brick_index % 3;
 
+	assert(ndev->type != NPU2_DEV_TYPE_OPENCAPI);
 	/* On the second obus chiplet, index is reversed */
 	if ((ndev->pl_xscom_base & 0x3F000000) != 0x09000000)
 		return 2 - index;
@@ -217,6 +235,9 @@ static void set_iovalid(struct npu2_dev *ndev, bool raise)
 {
 	uint64_t addr, val, mask;
 	int rc;
+
+	if (ndev->type == NPU2_DEV_TYPE_OPENCAPI)
+		return;
 
 	addr = (ndev->pl_xscom_base & 0x3F000000) | 0x9;
 	mask = PPC_BIT(6 + obus_brick_index(ndev));
@@ -260,6 +281,14 @@ uint32_t reset_ntl(struct npu2_dev *ndev)
 		phy_write_lane(ndev, &NPU2_PHY_RX_LANE_ANA_PDWN, lane, 0);
 		phy_write_lane(ndev, &NPU2_PHY_RX_LANE_DIG_PDWN, lane, 0);
 		phy_write_lane(ndev, &NPU2_PHY_TX_LANE_PDWN, lane, 0);
+	}
+
+	/* Clear fence state for the brick */
+	val = npu2_read(ndev->npu, NPU2_MISC_FENCE_STATE);
+	if (val & PPC_BIT(ndev->brick_index)) {
+		NPU2DEVINF(ndev, "Clearing brick fence\n");
+		val = PPC_BIT(ndev->brick_index);
+		npu2_write(ndev->npu, NPU2_MISC_FENCE_STATE, val);
 	}
 
 	/* Write PRI */
@@ -310,7 +339,7 @@ static uint32_t reset_ntl_release(struct npu2_dev *ndev)
 	npu2_fir = 0;
 
 	for (i = 0; i < NPU2_TOTAL_FIR_REGISTERS; i++) {
-		npu2_write(ndev->npu, npu2_fir_addr, npu2_fir);
+		xscom_write(ndev->npu->chip_id, npu2_fir_addr, npu2_fir);
 		npu2_fir_addr += NPU2_FIR_OFFSET;
 
 	}
@@ -438,7 +467,7 @@ DEFINE_PROCEDURE(phy_reset, phy_reset_wait, phy_reset_complete);
 /* Procedure 1.2.6 - I/O PHY Tx Impedance Calibration */
 static uint32_t phy_tx_zcal(struct npu2_dev *ndev)
 {
-	if (ndev->npu->tx_zcal_complete[ndev->brick_index > 2])
+	if (ndev->npu->tx_zcal_complete[obus_index(ndev)])
 		return PROCEDURE_COMPLETE;
 
 	/* Turn off SW enable and enable zcal state machine */
@@ -609,7 +638,7 @@ static uint32_t phy_tx_zcal_calculate(struct npu2_dev *ndev)
 	phy_write(ndev, &NPU2_PHY_TX_MARGINPU_SELECT, therm(margin_select + 1)/2);
 	phy_write(ndev, &NPU2_PHY_TX_MARGINPD_SELECT, therm(margin_select + 1)/2);
 
-	ndev->npu->tx_zcal_complete[ndev->brick_index > 2] = 1;
+	ndev->npu->tx_zcal_complete[obus_index(ndev)] = 1;
 	return PROCEDURE_COMPLETE;
 }
 DEFINE_PROCEDURE(phy_tx_zcal, phy_tx_zcal_wait, phy_tx_zcal_calculate);
@@ -981,22 +1010,7 @@ void npu2_opencapi_bump_ui_lane(struct npu2_dev *dev)
 	uint64_t status_xscom;
 	int lane, bit = 7;
 
-	switch (dev->brick_index) {
-	case 2:
-		status_xscom = OB0_ODL0_TRAINING_STATUS;
-		break;
-	case 3:
-		status_xscom = OB0_ODL1_TRAINING_STATUS;
-		break;
-	case 4:
-		status_xscom = OB3_ODL1_TRAINING_STATUS;
-		break;
-	case 5:
-		status_xscom = OB3_ODL0_TRAINING_STATUS;
-		break;
-	default:
-		assert(false);
-	}
+	status_xscom = OB_ODL_TRAINING_STATUS(dev->brick_index);
 	xscom_read(dev->npu->chip_id, status_xscom, &reg);
 	reg = GETFIELD(OB_ODL_TRAINING_STATUS_STS_RX_PATTERN_B, reg);
 
@@ -1011,17 +1025,20 @@ void npu2_opencapi_bump_ui_lane(struct npu2_dev *dev)
 	}
 }
 
-void npu2_opencapi_phy_setup(struct npu2_dev *dev)
+void npu2_opencapi_phy_init(struct npu2_dev *dev)
 {
+	run_procedure(dev, 5); /* procedure_phy_tx_zcal */
 	/*
 	 * This is only required for OpenCAPI - Hostboot tries to set this
 	 * on systems where it can tell a link is OpenCAPI, but for
 	 * Witherspoon it needs to be done in skiboot after device detection.
 	 */
 	phy_write(dev, &NPU2_PHY_RX_RC_ENABLE_AUTO_RECAL, 0x1);
+}
 
+void npu2_opencapi_phy_reset(struct npu2_dev *dev)
+{
 	run_procedure(dev, 4); /* procedure_phy_reset */
-	run_procedure(dev, 5); /* procedure_phy_tx_zcal */
 	run_procedure(dev, 6); /* procedure_phy_rx_dccal */
 }
 

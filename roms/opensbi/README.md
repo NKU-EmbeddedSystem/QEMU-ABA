@@ -47,7 +47,7 @@ cross-compilation, you can build your own toolchain or just download
 a prebuilt one from the
 [Bootlin toolchain repository] (https://toolchains.bootlin.com/).
 
-Please note that only a 64bit version of the toolchain is available in
+Please note that only a 64-bit version of the toolchain is available in
 the Bootlin toolchain repository for now.
 
 Building and Installing the OpenSBI Platform-Independent Library
@@ -131,6 +131,25 @@ top-level make command line. These options, such as *PLATFORM_<xyz>* or
 *docs/platform/<platform_name>.md* files and
 *docs/firmware/<firmware_name>.md* files.
 
+Building 32-bit / 64-bit OpenSBI Images
+---------------------------------------
+By default, building OpenSBI generates 32-bit or 64-bit images based on the
+supplied RISC-V cross-compile toolchain. For example if *CROSS_COMPILE* is set
+to *riscv64-unknown-elf-*, 64-bit OpenSBI images will be generated. If building
+32-bit OpenSBI images, *CROSS_COMPILE* should be set to a toolchain that is
+pre-configured to generate 32-bit RISC-V codes, like *riscv32-unknown-elf-*.
+
+However it's possible to explicitly specify the image bits we want to build with
+a given RISC-V toolchain. This can be done by setting the environment variable
+*PLATFORM_RISCV_XLEN* to the desired width, for example:
+
+```
+export CROSS_COMPILE=riscv64-unknown-elf-
+export PLATFORM_RISCV_XLEN=32
+```
+
+will generate 32-bit OpenSBI images. And vice vesa.
+
 License
 -------
 
@@ -153,14 +172,10 @@ OpenSBI source code also contains code reused from other projects as listed
 below. The original license text of these projects is included in the source
 files where the reused code is present.
 
-1. The libfdt source code is disjunctively dual licensed
-   (GPL-2.0+ OR BSD-2-Clause). Some of this project code is used in OpenSBI
-   under the terms of the BSD 2-Clause license. Any contributions to this
-   code must be made under the terms of both licenses.
-2. Some source file for the Kendryte/k210 platform code are based on code from
-   the [Kendryte standalone SDK] available on github. These files retain the
-   original copyright and license of the Kendryte standalone SDK project and
-   are licensed under the terms of the Apache License, Version 2.0.
+* The libfdt source code is disjunctively dual licensed
+  (GPL-2.0+ OR BSD-2-Clause). Some of this project code is used in OpenSBI
+  under the terms of the BSD 2-Clause license. Any contributions to this
+  code must be made under the terms of both licenses.
 
 See also the [third party notices] file for more information.
 

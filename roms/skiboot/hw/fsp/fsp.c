@@ -14,22 +14,12 @@
  * limitations under the License.
  */
 
-/*
- * Service Processor handling code
- *
- * XXX This mixes PSI and FSP and currently only supports
- * P7/P7+ PSI and FSP1
- *
- * If we are going to support P8 PSI and FSP2, we probably want
- * to split the PSI support from the FSP support proper first.
- */
 #include <stdarg.h>
 #include <processor.h>
 #include <io.h>
 #include <fsp.h>
 #include <lock.h>
 #include <interrupts.h>
-#include <gx.h>
 #include <device.h>
 #include <trace.h>
 #include <timebase.h>
@@ -39,6 +29,8 @@
 #include <opal-msg.h>
 #include <ccan/list/list.h>
 
+extern uint32_t hir_trigger;
+
 DEFINE_LOG_ENTRY(OPAL_RC_FSP_POLL_TIMEOUT, OPAL_PLATFORM_ERR_EVT, OPAL_FSP,
 		 OPAL_PLATFORM_FIRMWARE, OPAL_RECOVERED_ERR_GENERAL, OPAL_NA);
 
@@ -47,6 +39,13 @@ DEFINE_LOG_ENTRY(OPAL_RC_FSP_MBOX_ERR, OPAL_PLATFORM_ERR_EVT, OPAL_FSP,
 
 DEFINE_LOG_ENTRY(OPAL_RC_FSP_DISR_HIR_MASK, OPAL_PLATFORM_ERR_EVT, OPAL_FSP,
 		 OPAL_PLATFORM_FIRMWARE, OPAL_RECOVERED_ERR_GENERAL, OPAL_NA);
+
+/* We make this look like a Surveillance error, even though it really
+ * isn't one.
+ */
+DEFINE_LOG_ENTRY(OPAL_INJECTED_HIR, OPAL_MISC_ERR_EVT, OPAL_SURVEILLANCE,
+		OPAL_SURVEILLANCE_ERR, OPAL_PREDICTIVE_ERR_GENERAL,
+		OPAL_MISCELLANEOUS_INFO_ONLY);
 
 #define FSP_TRACE_MSG
 #define FSP_TRACE_EVENT
@@ -178,6 +177,8 @@ static struct fsp_cmdclass fsp_cmdclass[FSP_MCLASS_LAST - FSP_MCLASS_FIRST + 1]
 	DEF_CLASS(FSP_MCLASS_DIAG,		16),
 	DEF_CLASS(FSP_MCLASS_PCIE_LINK_TOPO,	16),
 	DEF_CLASS(FSP_MCLASS_OCC,		16),
+	DEF_CLASS(FSP_MCLASS_TRUSTED_BOOT,	2),
+	DEF_CLASS(FSP_MCLASS_HBRT,		2),
 };
 
 static void fsp_trace_msg(struct fsp_msg *msg, u8 dir __unused)
@@ -2025,6 +2026,14 @@ static void fsp_create_fsp(struct dt_node *fsp_node)
 
 static void fsp_opal_poll(void *data __unused)
 {
+	/* Test the host initiated reset */
+	if (hir_trigger == 0xdeadbeef) {
+		uint32_t plid = log_simple_error(&e_info(OPAL_INJECTED_HIR),
+			"SURV: Injected HIR, initiating FSP R/R\n");
+		fsp_trigger_reset(plid);
+		hir_trigger = 0;
+	}
+
 	if (try_lock(&fsp_lock)) {
 		__fsp_poll(false);
 		unlock(&fsp_lock);

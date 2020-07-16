@@ -18,12 +18,10 @@
 #include <cpu.h>
 #include <pci.h>
 #include <pci-cfg.h>
-#include <pci-iov.h>
 #include <pci-slot.h>
 #include <pci-quirk.h>
 #include <timebase.h>
 #include <device.h>
-#include <fsp.h>
 
 #define MAX_PHB_ID	256
 static struct phb *phbs[MAX_PHB_ID];
@@ -193,7 +191,6 @@ void pci_init_capabilities(struct phb *phb, struct pci_device *pd)
 {
 	pci_init_pcie_cap(phb, pd);
 	pci_init_aer_cap(phb, pd);
-	pci_init_iov_cap(phb, pd);
 	pci_init_pm_cap(phb, pd);
 }
 
@@ -1423,15 +1420,35 @@ static void pci_add_loc_code(struct dt_node *np, struct pci_device *pd)
 	uint8_t class, sub;
 	uint8_t pos, len;
 
-	/* If there is a label assigned to the function, use it on openpower machines */
-	if (pd->slot)
-		blcode = dt_prop_get_def(np, "ibm,slot-label", NULL);
+	while (p) {
+		/* if we have a slot label (i.e. openpower) use that */
+		blcode = dt_prop_get_def(p, "ibm,slot-label", NULL);
+		if (blcode)
+			break;
 
-	/* Look for a parent with a slot-location-code */
-	while (!blcode && p) {
+		/* otherwise use the fully qualified location code */
 		blcode = dt_prop_get_def(p, "ibm,slot-location-code", NULL);
+		if (blcode)
+			break;
+
 		p = p->parent;
 	}
+
+	if (!blcode)
+		blcode = dt_prop_get_def(np, "ibm,slot-location-code", NULL);
+
+	if (!blcode) {
+		/* Fall back to finding a ibm,loc-code */
+		p = np->parent;
+
+		while (p) {
+			blcode = dt_prop_get_def(p, "ibm,loc-code", NULL);
+			if (blcode)
+				break;
+			p = p->parent;
+		}
+	}
+
 	if (!blcode)
 		return;
 
@@ -1443,7 +1460,7 @@ static void pci_add_loc_code(struct dt_node *np, struct pci_device *pd)
 	/* XXX Don't do that on openpower for now, we will need to sort things
 	 * out later, otherwise the mezzanine slot on Habanero gets weird results
 	 */
-	if (class == 0x02 && sub == 0x00 && fsp_present()) {
+	if (class == 0x02 && sub == 0x00 && !platform.bmc) {
 		/* There's usually several spaces at the end of the property.
 		   Test for, but don't rely on, that being the case */
 		len = strlen(blcode);
@@ -1471,7 +1488,7 @@ static void pci_print_summary_line(struct phb *phb, struct pci_device *pd,
 {
 	const char *label, *dtype, *s;
 	u32 vdid;
-#define MAX_SLOTSTR 32
+#define MAX_SLOTSTR 80
 	char slotstr[MAX_SLOTSTR  + 1] = { 0, };
 
 	pci_cfg_read32(phb, pd->bdfn, 0, &vdid);
@@ -1524,11 +1541,11 @@ static void pci_print_summary_line(struct phb *phb, struct pci_device *pd,
 			  rev_class & 0xff, rev_class >> 8, cname, slotstr);
 }
 
-static void pci_add_one_device_node(struct phb *phb,
-				    struct pci_device *pd,
-				    struct dt_node *parent_node,
-				    struct pci_lsi_state *lstate,
-				    uint8_t swizzle)
+static void __noinline pci_add_one_device_node(struct phb *phb,
+					       struct pci_device *pd,
+					       struct dt_node *parent_node,
+					       struct pci_lsi_state *lstate,
+					       uint8_t swizzle)
 {
 	struct dt_node *np;
 	const char *cname;
@@ -1606,6 +1623,15 @@ static void pci_add_one_device_node(struct phb *phb,
 	if (pd->slot)
 		pci_slot_add_dt_properties(pd->slot, np);
 
+	/*
+	 * Use the phb base location code for root ports if the platform
+	 * doesn't provide one via slot->add_properties() operation.
+	 */
+	if (pd->dev_type == PCIE_TYPE_ROOT_PORT && phb->base_loc_code &&
+	    !dt_has_node_property(np, "ibm,slot-location-code", NULL))
+		dt_add_property_string(np, "ibm,slot-location-code",
+				       phb->base_loc_code);
+
 	/* Make up location code */
 	pci_add_loc_code(np, pd);
 
@@ -1653,11 +1679,11 @@ static void pci_add_one_device_node(struct phb *phb,
 	dt_add_property(np, "ranges", ranges_direct, sizeof(ranges_direct));
 }
 
-void pci_add_device_nodes(struct phb *phb,
-			  struct list_head *list,
-			  struct dt_node *parent_node,
-			  struct pci_lsi_state *lstate,
-			  uint8_t swizzle)
+void __noinline pci_add_device_nodes(struct phb *phb,
+				     struct list_head *list,
+				     struct dt_node *parent_node,
+				     struct pci_lsi_state *lstate,
+				     uint8_t swizzle)
 {
 	struct pci_device *pd;
 

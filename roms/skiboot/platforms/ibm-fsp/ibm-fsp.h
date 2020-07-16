@@ -20,6 +20,7 @@
 
 extern void ibm_fsp_init(void);
 extern void ibm_fsp_exit(void);
+void ibm_fsp_finalise_dt(bool is_reboot);
 
 extern int64_t ibm_fsp_cec_power_down(uint64_t request);
 extern int64_t ibm_fsp_cec_reboot(void);
@@ -42,5 +43,15 @@ extern void firenze_pci_setup_phb(struct phb *phb,
 				  unsigned int index);
 extern void firenze_pci_get_slot_info(struct phb *phb,
 				      struct pci_device *pd);
+
+/* VPD support */
+void vpd_iohub_load(struct dt_node *hub_node);
+void vpd_preload(struct dt_node *hub_node);
+
+/* Platform heartbeat time */
+int fsp_heartbeat_time(void);
+
+extern struct platform_psi fsp_platform_psi;
+extern struct platform_prd fsp_platform_prd;
 
 #endif /*  __IBM_FSP_COMMON_H */

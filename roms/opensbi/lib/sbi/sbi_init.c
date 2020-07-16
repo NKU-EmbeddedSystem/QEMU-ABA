@@ -34,8 +34,13 @@ static void sbi_boot_prints(struct sbi_scratch *scratch, u32 hartid)
 	const struct sbi_platform *plat = sbi_platform_ptr(scratch);
 
 	misa_string(str, sizeof(str));
+#ifdef OPENSBI_VERSION_GIT
+	sbi_printf("\nOpenSBI %s (%s %s)\n", OPENSBI_VERSION_GIT,
+		   __DATE__, __TIME__);
+#else
 	sbi_printf("\nOpenSBI v%d.%d (%s %s)\n", OPENSBI_VERSION_MAJOR,
 		   OPENSBI_VERSION_MINOR, __DATE__, __TIME__);
+#endif
 
 	sbi_printf(BANNER);
 
@@ -97,7 +102,7 @@ static void __noreturn init_coldboot(struct sbi_scratch *scratch, u32 hartid)
 		sbi_hart_wake_coldboot_harts(scratch, hartid);
 	sbi_hart_mark_available(hartid);
 	sbi_hart_switch_mode(hartid, scratch->next_arg1, scratch->next_addr,
-			     scratch->next_mode);
+			     scratch->next_mode, FALSE);
 }
 
 static void __noreturn init_warmboot(struct sbi_scratch *scratch, u32 hartid)
@@ -142,7 +147,8 @@ static void __noreturn init_warmboot(struct sbi_scratch *scratch, u32 hartid)
 		sbi_hart_hang();
 	else
 		sbi_hart_switch_mode(hartid, scratch->next_arg1,
-				     scratch->next_addr, scratch->next_mode);
+				     scratch->next_addr,
+				     scratch->next_mode, FALSE);
 }
 
 static atomic_t coldboot_lottery = ATOMIC_INITIALIZER(0);

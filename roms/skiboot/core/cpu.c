@@ -110,7 +110,7 @@ static void cpu_wake(struct cpu_thread *cpu)
 	if (!cpu->in_idle)
 		return;
 
-	if (proc_gen == proc_gen_p8 || proc_gen == proc_gen_p7) {
+	if (proc_gen == proc_gen_p8) {
 		/* Poke IPI */
 		icp_kick_cpu(cpu);
 	} else if (proc_gen == proc_gen_p9) {
@@ -361,8 +361,12 @@ void cpu_process_jobs(void)
 			free(job);
 		func(data);
 		if (!list_empty(&cpu->locks_held)) {
-			prlog(PR_ERR, "OPAL job %s returning with locks held\n",
-			      job->name);
+			if (no_return)
+				prlog(PR_ERR, "OPAL no-return job returned with"
+				      "locks held!\n");
+			else
+				prlog(PR_ERR, "OPAL job %s returning with locks held\n",
+				      job->name);
 			drop_my_locks(true);
 		}
 		lock(&cpu->job_lock);
@@ -992,10 +996,6 @@ void init_boot_cpu(void)
 
 	/* Get CPU family and other flags based on PVR */
 	switch(PVR_TYPE(pvr)) {
-	case PVR_TYPE_P7:
-	case PVR_TYPE_P7P:
-		proc_gen = proc_gen_p7;
-		break;
 	case PVR_TYPE_P8E:
 	case PVR_TYPE_P8:
 		proc_gen = proc_gen_p8;
@@ -1023,11 +1023,6 @@ void init_boot_cpu(void)
 
 	/* Get a CPU thread count based on family */
 	switch(proc_gen) {
-	case proc_gen_p7:
-		cpu_thread_count = 4;
-		prlog(PR_INFO, "CPU: P7 generation processor"
-		      " (max %d threads/core)\n", cpu_thread_count);
-		break;
 	case proc_gen_p8:
 		cpu_thread_count = 8;
 		prlog(PR_INFO, "CPU: P8 generation processor"
@@ -1433,20 +1428,6 @@ static int64_t cpu_change_all_hid0(struct hid0_change_req *req)
 	return OPAL_SUCCESS;
 }
 
-void cpu_set_radix_mode(void)
-{
-	struct hid0_change_req req;
-
-	if (!radix_supported)
-		return;
-
-	req.clr_bits = 0;
-	req.set_bits = SPR_HID0_POWER9_RADIX;
-	cleanup_global_tlb();
-	current_radix_mode = true;
-	cpu_change_all_hid0(&req);
-}
-
 static void cpu_cleanup_one(void *param __unused)
 {
 	mtspr(SPR_AMR, 0);
@@ -1488,8 +1469,8 @@ void cpu_fast_reboot_complete(void)
 	/* Fast reboot will have cleared HID0:HILE */
 	current_hile_mode = false;
 
-	/* On P9, restore radix mode */
-	cpu_set_radix_mode();
+	/* and set HID0:RADIX */
+	current_radix_mode = true;
 }
 
 static int64_t opal_reinit_cpus(uint64_t flags)
@@ -1593,13 +1574,6 @@ static int64_t opal_reinit_cpus(uint64_t flags)
 	 /* Apply HID bits changes if any */
 	if (req.set_bits || req.clr_bits)
 		cpu_change_all_hid0(&req);
-
-	/* If we have a P7, error out for LE switch, do nothing for BE */
-	if (proc_gen < proc_gen_p8) {
-		if (flags & OPAL_REINIT_CPUS_HILE_LE)
-			rc = OPAL_UNSUPPORTED;
-		flags &= ~(OPAL_REINIT_CPUS_HILE_BE | OPAL_REINIT_CPUS_HILE_LE);
-	}
 
 	if (flags & OPAL_REINIT_CPUS_TM_SUSPEND_DISABLED) {
 		flags &= ~OPAL_REINIT_CPUS_TM_SUSPEND_DISABLED;

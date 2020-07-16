@@ -28,11 +28,13 @@
 #include "qapi/error.h"
 #include "qemu.h"
 #include "qemu/path.h"
+#include "qemu/queue.h"
 #include "qemu/config-file.h"
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include "qemu/help_option.h"
 #include "qemu/module.h"
+#include "qemu/plugin.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "tcg.h"
@@ -44,203 +46,10 @@
 #include "target_elf.h"
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
-#include <sys/timeb.h>
-
-
-static pthread_cond_t stw_sleep_cond   = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t stw_request_cond = PTHREAD_COND_INITIALIZER;
-static pthread_mutex_t stw_lock = PTHREAD_MUTEX_INITIALIZER;
-static int stw_requests;
-static bool stw_ongoing;
-__thread bool stw_held;
-/* Globals */
-int ldex_count;
-int stex_count;
-long long llsc_single;
-long long llsc_multi;
-struct timeb t_start, t_multi_start, t_multi_end, t_end;
-long long t_single, t_multi;
-int is_multi;
-int thread_count;
-pthread_mutex_t g_sc_lock;
-#define X_MONITOR
-//#define X_LOG
-#ifdef X_MONITOR
-/* Exclusive Monitor */
-#define PAGE_MASK 0xfffff000
-pthread_mutex_t x_mon_mutex = PTHREAD_MUTEX_INITIALIZER;
-typedef struct x_node {
-	int tid;
-	uint32_t exclusive_addr;
-	uint32_t page_addr;	
-	struct x_node *next;
-} x_node;
-x_node	exclusive_monitor;
-x_node* exclusive_monitor_head = &exclusive_monitor;
-void* x_monitor_register_thread(int tid);
-void x_monitor_show(const char *info);
-int x_monitor_unregister_thread(int tid);
-int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr);
-int x_monitor_check_and_clean(int tid, uint32_t addr);
-int x_monitor_check_exclusive(void* p_node, uint32_t addr);
-
-
-void x_monitor_show(const char *info)
-{
-	char buf[0x1000];
-	sprintf(buf, "[x_monitor_show] in  %s\n", info);
-	x_node *p = exclusive_monitor_head->next;
-	while (p) {
-		sprintf(buf, "%snode addr %p thread %d x_addr %x x_page %x\n", buf, p, p->tid, p->exclusive_addr, p->page_addr);
-		p = p->next;
-	}
-	fprintf(stderr, "%s", buf);
-}
-		
-
-void* x_monitor_register_thread(int tid)
-{
-#ifdef X_LOG
-	fprintf(stderr, "[register_thread]\tregistering thread %d\n", tid);
-#endif
-
-
-	pthread_mutex_lock(&x_mon_mutex);
-	thread_count++;
-	if (thread_count == 1) {
-		ftime(&t_start);
-		fprintf(stderr, "[x_mon]\tprogram start!\n");
-	}
-	if (thread_count>1)
-	if (!is_multi) {
-		is_multi = 1;
-		ftime(&t_multi_start);
-		int secDiff = t_multi_start.time - t_start.time;
-		secDiff *= 1000;
-		secDiff += (t_multi_start.millitm - t_start.millitm);
-		fprintf(stderr, "[x_mon]\tmulti thread begin! used: %dms\n", secDiff);
-		t_single += secDiff;
-	}
-	x_node *p = malloc(sizeof(x_node));
-	p->tid = tid;
-	p->exclusive_addr = 0;
-	p->page_addr = 0;
-	p->next = exclusive_monitor_head->next;
-	exclusive_monitor_head->next = p;
-#ifdef X_LOG
-	x_monitor_show("register thread");
-#endif
-	pthread_mutex_unlock(&x_mon_mutex);
-	return (void*)p;
-}
-int x_monitor_unregister_thread(int tid)
-{
-	int ret = 1;
-	pthread_mutex_lock(&x_mon_mutex);
-#ifdef X_LOG
-	x_monitor_show("unregister thread");
-#endif
-	thread_count--;
-	if (thread_count == 1) {
-		is_multi = 0;
-		ftime(&t_multi_end);
-		int secDiff = t_multi_end.time - t_multi_start.time;
-		secDiff *= 1000;
-		secDiff += (t_multi_end.millitm - t_multi_start.millitm);
-		fprintf(stderr, "[x_mon]\tmulti thread end! used: %dms\n", secDiff);
-		t_multi += secDiff;
-	}
-	if (thread_count == 0) {
-		is_multi = 0;
-		ftime(&t_end);
-		int secDiff = t_end.time - t_multi_end.time;
-		secDiff *= 1000;
-		secDiff += (t_end.millitm - t_multi_end.millitm);
-		t_single += secDiff;
-		fprintf(stderr, "[x_mon]\tall thread end! used: %dms\n", secDiff);
-		double total = (double)t_single+(double)t_multi;
-		fprintf(stderr, "[x_mon]\tt_single=%lldms, t_multi=%lldms, single rate=%lf\n", 
-				t_single, t_multi, (double)t_single/total);
-		fprintf(stderr, "[x_mon]\tllsc_single=%lld, llsc_multi=%lld\n", llsc_single, llsc_multi);
-	}
-
-
-	x_node *p = exclusive_monitor_head->next, *pre = exclusive_monitor_head;
-	while (p) {
-		if (p->tid == tid) {
-			ret = 0;
-			pre->next = p->next;
-#ifdef X_LOG
-			fprintf(stderr, "unregister thread %d\n", p->tid);
-#endif
-			free(p);
-			break;
-		}
-		pre = p;
-		p = p->next;
-	}
-#ifdef X_LOG
-	x_monitor_show("unregister thread");
-#endif
-	pthread_mutex_unlock(&x_mon_mutex);
-	return ret;
-}
-int x_monitor_set_exclusive_addr(void* p_node, uint32_t addr)
-{
-	pthread_mutex_lock(&x_mon_mutex);
-#ifdef X_LOG
-	fprintf(stderr, "[x_monitor_set_exclusive_addr]\ttid %d, p_node %p, addr %x\n", ((x_node*)p_node)->tid, p_node, addr);
-#endif
-	x_node *p = (x_node*)p_node;
-	p->exclusive_addr = addr;
-	p->page_addr = addr & PAGE_MASK;
-#ifdef X_LOG
-	x_monitor_show("set x addr");
-#endif
-	pthread_mutex_unlock(&x_mon_mutex);
-	return 0;
-}
-int x_monitor_check_exclusive(void* p_node, uint32_t addr)
-{
-	pthread_mutex_lock(&x_mon_mutex);
-	x_node *p = (x_node*)p_node;
-#ifdef X_LOG
-	x_monitor_show("check ex");
-	fprintf(stderr, "tid %d, node addr %p, x addr = %x, addr = %p\n", p->tid, p_node, p->exclusive_addr, (void*)(long)addr);
-#endif
-	pthread_mutex_unlock(&x_mon_mutex);
-	return (p->exclusive_addr == addr);
-}
-
-int x_monitor_check_and_clean(int tid, uint32_t addr)
-{
-	pthread_mutex_lock(&x_mon_mutex);
-	x_node *p = exclusive_monitor_head->next;
-	uint32_t page_addr = addr & PAGE_MASK;
-	while (p) {
-		if (p->page_addr == page_addr) {
-			//!!!!!!!!!!!!!
-				p->exclusive_addr = 0;
-#ifdef X_LOG
-				fprintf(stderr, "cleaned thread %d x_addr %x\n", p->tid, p->exclusive_addr);
-#endif
-		}
-		p = p->next;
-	}
-#ifdef X_LOG
-	x_monitor_show("check and clean");
-#endif
-	pthread_mutex_unlock(&x_mon_mutex);
-	return 0;
-}
-#endif
-
-
 
 char *exec_path;
 
 int singlestep;
-static const char *filename;
 static const char *argv0;
 static int gdbstub_port;
 static envlist_t *envlist;
@@ -250,8 +59,13 @@ static const char *seed_optarg;
 unsigned long mmap_min_addr;
 unsigned long guest_base;
 int have_guest_base;
-uint32_t tid;
 
+static pthread_cond_t stw_sleep_cond   = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t stw_request_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t stw_lock = PTHREAD_MUTEX_INITIALIZER;
+static int stw_requests;
+static bool stw_ongoing;
+__thread bool stw_held;
 /*
  * When running 32-on-64 we should make sure we can fit all of the possible
  * guest address space into a contiguous chunk of virtual host memory.
@@ -270,12 +84,12 @@ uint32_t tid;
       (TARGET_LONG_BITS == 32 || defined(TARGET_ABI32))
 /* There are a number of places where we assign reserved_va to a variable
    of type abi_ulong and expect it to fit.  Avoid the last page.  */
-#   define MAX_RESERVED_VA  (0xfffffffful & TARGET_PAGE_MASK)
+#   define MAX_RESERVED_VA(CPU)  (0xfffffffful & TARGET_PAGE_MASK)
 #  else
-#   define MAX_RESERVED_VA  (1ul << TARGET_VIRT_ADDR_SPACE_BITS)
+#   define MAX_RESERVED_VA(CPU)  (1ul << TARGET_VIRT_ADDR_SPACE_BITS)
 #  endif
 # else
-#  define MAX_RESERVED_VA  0
+#  define MAX_RESERVED_VA(CPU)  0
 # endif
 #endif
 
@@ -435,7 +249,6 @@ void task_settid(TaskState *ts)
 {
     if (ts->ts_tid == 0) {
         ts->ts_tid = (pid_t)syscall(SYS_gettid);
-		tid = ts->ts_tid;
     }
 }
 
@@ -507,7 +320,7 @@ static void handle_arg_log(const char *arg)
 
 static void handle_arg_dfilter(const char *arg)
 {
-    qemu_set_dfilter_ranges(arg, NULL);
+    qemu_set_dfilter_ranges(arg, &error_fatal);
 }
 
 static void handle_arg_log_filename(const char *arg)
@@ -628,8 +441,7 @@ static void handle_arg_reserved_va(const char *arg)
         unsigned long unshifted = reserved_va;
         p++;
         reserved_va <<= shift;
-        if (reserved_va >> shift != unshifted
-            || (MAX_RESERVED_VA && reserved_va > MAX_RESERVED_VA)) {
+        if (reserved_va >> shift != unshifted) {
             fprintf(stderr, "Reserved virtual address too big\n");
             exit(EXIT_FAILURE);
         }
@@ -663,6 +475,22 @@ static void handle_arg_trace(const char *arg)
     g_free(trace_file);
     trace_file = trace_opt_parse(arg);
 }
+
+#if defined(TARGET_XTENSA)
+static void handle_arg_abi_call0(const char *arg)
+{
+    xtensa_set_abi_call0();
+}
+#endif
+
+static QemuPluginList plugins = QTAILQ_HEAD_INITIALIZER(plugins);
+
+#ifdef CONFIG_PLUGIN
+static void handle_arg_plugin(const char *arg)
+{
+    qemu_plugin_opt_parse(arg, &plugins);
+}
+#endif
 
 struct qemu_argument {
     const char *argv;
@@ -715,8 +543,16 @@ static const struct qemu_argument arg_table[] = {
      "",           "Seed for pseudo-random number generator"},
     {"trace",      "QEMU_TRACE",       true,  handle_arg_trace,
      "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
+#ifdef CONFIG_PLUGIN
+    {"plugin",     "QEMU_PLUGIN",      true,  handle_arg_plugin,
+     "",           "[file=]<file>[,arg=<string>]"},
+#endif
     {"version",    "QEMU_VERSION",     false, handle_arg_version,
      "",           "display version information and exit"},
+#if defined(TARGET_XTENSA)
+    {"xtensa-abi-call0", "QEMU_XTENSA_ABI_CALL0", false, handle_arg_abi_call0,
+     "",           "assume CALL0 Xtensa ABI"},
+#endif
     {NULL, NULL, false, NULL, NULL, NULL}
 };
 
@@ -857,7 +693,6 @@ static int parse_args(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    filename = argv[optind];
     exec_path = argv[optind];
 
     return optind;
@@ -878,14 +713,12 @@ int main(int argc, char **argv, char **envp)
     int i;
     int ret;
     int execfd;
+    unsigned long max_reserved_va;
 
-	ftime(&t_start);
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
-
-	pthread_mutex_init(&g_sc_lock, NULL);
 
     envlist = envlist_create();
 
@@ -908,6 +741,7 @@ int main(int argc, char **argv, char **envp)
     cpu_model = NULL;
 
     qemu_add_opts(&qemu_trace_opts);
+    qemu_plugin_add_opts();
 
     optind = parse_args(argc, argv);
 
@@ -915,6 +749,9 @@ int main(int argc, char **argv, char **envp)
         exit(1);
     }
     trace_init_file(trace_file);
+    if (qemu_plugin_load_list(&plugins)) {
+        exit(1);
+    }
 
     /* Zero out regs */
     memset(regs, 0, sizeof(struct target_pt_regs));
@@ -931,9 +768,9 @@ int main(int argc, char **argv, char **envp)
 
     execfd = qemu_getauxval(AT_EXECFD);
     if (execfd == 0) {
-        execfd = open(filename, O_RDONLY);
+        execfd = open(exec_path, O_RDONLY);
         if (execfd < 0) {
-            printf("Error while loading %s: %s\n", filename, strerror(errno));
+            printf("Error while loading %s: %s\n", exec_path, strerror(errno));
             _exit(EXIT_FAILURE);
         }
     }
@@ -946,31 +783,31 @@ int main(int argc, char **argv, char **envp)
     /* init tcg before creating CPUs and to get qemu_host_page_size */
     tcg_exec_init(0);
 
-    /* Reserving *too* much vm space via mmap can run into problems
-       with rlimits, oom due to page table creation, etc.  We will still try it,
-       if directed by the command-line option, but not by default.  */
-    if (HOST_LONG_BITS == 64 &&
-        TARGET_VIRT_ADDR_SPACE_BITS <= 32 &&
-        reserved_va == 0) {
-        /* reserved_va must be aligned with the host page size
-         * as it is used with mmap()
-         */
-        reserved_va = MAX_RESERVED_VA & qemu_host_page_mask;
-    }
-
     cpu = cpu_create(cpu_type);
     env = cpu->env_ptr;
     cpu_reset(cpu);
-
     thread_cpu = cpu;
 
-    if (getenv("QEMU_STRACE")) {
-        do_strace = 1;
+    /*
+     * Reserving too much vm space via mmap can run into problems
+     * with rlimits, oom due to page table creation, etc.  We will
+     * still try it, if directed by the command-line option, but
+     * not by default.
+     */
+    max_reserved_va = MAX_RESERVED_VA(cpu);
+    if (reserved_va != 0) {
+        if (max_reserved_va && reserved_va > max_reserved_va) {
+            fprintf(stderr, "Reserved virtual address too big\n");
+            exit(EXIT_FAILURE);
+        }
+    } else if (HOST_LONG_BITS == 64 && TARGET_VIRT_ADDR_SPACE_BITS <= 32) {
+        /*
+         * reserved_va must be aligned with the host page size
+         * as it is used with mmap()
+         */
+        reserved_va = max_reserved_va & qemu_host_page_mask;
     }
 
-    if (seed_optarg == NULL) {
-        seed_optarg = getenv("QEMU_RAND_SEED");
-    }
     {
         Error *err = NULL;
         if (seed_optarg != NULL) {
@@ -1057,13 +894,11 @@ int main(int argc, char **argv, char **envp)
     ts->bprm = &bprm;
     cpu->opaque = ts;
     task_settid(ts);
-	assert(tid != 0);
-	env->exclusive_tid = tid;
 
-    ret = loader_exec(execfd, filename, target_argv, target_environ, regs,
+    ret = loader_exec(execfd, exec_path, target_argv, target_environ, regs,
         info, &bprm);
     if (ret != 0) {
-        printf("Error while loading %s: %s\n", filename, strerror(-ret));
+        printf("Error while loading %s: %s\n", exec_path, strerror(-ret));
         _exit(EXIT_FAILURE);
     }
 
@@ -1111,11 +946,6 @@ int main(int argc, char **argv, char **envp)
         }
         gdb_handlesig(cpu, 0);
     }
-	uint32_t ret_mmp = target_mmap(0xa0000000, 
-						0x10000000, PROT_READ|PROT_WRITE,
-						MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-	assert(ret_mmp == 0xa0000000);
-	((CPUARMState*)env)->exclusive_node = (uint64_t)x_monitor_register_thread(tid);
     cpu_loop(env);
     /* never exits */
     return 0;

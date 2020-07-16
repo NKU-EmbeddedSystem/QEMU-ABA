@@ -30,6 +30,7 @@ enum resource_id {
 	RESOURCE_ID_CAPP,
 	RESOURCE_ID_IMA_CATALOG,
 	RESOURCE_ID_VERSION,
+	RESOURCE_ID_KERNEL_FW,
 };
 #define RESOURCE_SUBID_NONE 0
 #define RESOURCE_SUBID_SUPPORTED 1
@@ -76,6 +77,30 @@ struct platform_ocapi {
 					 * brick 1 lanes */
 };
 
+struct dt_node;
+
+/*
+ * Just for FSP platforms, allows us to partly decouple
+ * FSP specific code from core code.
+ */
+struct platform_psi {
+	void (*psihb_interrupt)(void);
+	void (*link_established)(void);
+	void (*fsp_interrupt)(void);
+};
+
+/*
+ * Some PRD functionality is platform specific.
+ */
+struct platform_prd {
+	void (*msg_response)(uint32_t rc);
+	int (*send_error_log)(uint32_t plid, uint32_t dsize, void *data);
+	int (*send_hbrt_msg)(void *data, u64 dsize);
+	int (*wakeup)(uint32_t i_core, uint32_t i_mode);
+	int (*fsp_occ_load_start_status)(u64 chipid, s64 status);
+	int (*fsp_occ_reset_status)(u64 chipid, s64 status);
+};
+
 /*
  * Each platform can provide a set of hooks
  * that can affect the generic code
@@ -89,6 +114,16 @@ struct platform {
 	 * not a constant.
 	 */
 	const struct bmc_platform *bmc;
+
+	/*
+	 * PSI handling code. FSP specific.
+	 */
+	const struct platform_psi *psi;
+
+	/*
+	 * Platform specific PRD handling
+	 */
+	const struct platform_prd *prd;
 
 	/* OpenCAPI platform-specific I2C information */
 	const struct platform_ocapi *ocapi;
@@ -122,6 +157,11 @@ struct platform {
 	 * the FSP driver is brought up.
 	 */
 	void		(*init)(void);
+
+	/*
+	 * Called once every thread is back in skiboot as part of fast reboot.
+	 */
+	void		(*fast_reboot_init)(void);
 
 	/*
 	 * These are used to power down and reboot the machine
@@ -213,7 +253,13 @@ struct platform {
 	int		(*resource_loaded)(enum resource_id id, uint32_t idx);
 
 	/*
+	 * Executed just prior to creating the dtb for the kernel.
+	 */
+	void		(*finalise_dt)(bool is_reboot);
+
+	/*
 	 * Executed just prior to handing control over to the payload.
+	 * Used to terminate watchdogs, etc.
 	 */
 	void		(*exit)(void);
 
@@ -231,6 +277,25 @@ struct platform {
 	 * OPAL terminate
 	 */
 	void __attribute__((noreturn)) (*terminate)(const char *msg);
+
+	/*
+	 * SEEPROM update routine
+	 */
+	void		(*seeprom_update)(void);
+
+	/*
+	 * Operator Panel display
+	 * Physical FSP op panel or LPC port 80h
+	 * or any other "get boot status out to the user" thing.
+	 */
+	void (*op_display)(enum op_severity sev, enum op_module mod,
+			   uint16_t code);
+
+	/*
+	 * VPD load.
+	 * Currently FSP specific.
+	 */
+	void (*vpd_iohub_load)(struct dt_node *hub_node);
 };
 
 extern struct platform __platforms_start;

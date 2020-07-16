@@ -62,6 +62,12 @@ static void fu540_modify_dt(void *fdt)
 	char cpu_node[32] = "";
 	const char *mmu_type;
 
+	size = fdt_totalsize(fdt);
+	err  = fdt_open_into(fdt, fdt, size + 256);
+	if (err < 0)
+		sbi_printf(
+			"Device Tree can't be expanded to accmodate new node");
+
 	for (i = 0; i < FU540_HART_COUNT; i++) {
 		sbi_sprintf(cpu_node, "/cpus/cpu@%d", i);
 		cpu_offset = fdt_path_offset(fdt, cpu_node);
@@ -70,14 +76,10 @@ static void fu540_modify_dt(void *fdt)
 				 !strcmp(mmu_type, "riscv,sv48")))
 			continue;
 		else
-			fdt_setprop_string(fdt, cpu_offset, "status", "masked");
+			fdt_setprop_string(fdt, cpu_offset, "status",
+					   "disabled");
 		memset(cpu_node, 0, sizeof(cpu_node));
 	}
-	size = fdt_totalsize(fdt);
-	err  = fdt_open_into(fdt, fdt, size + 256);
-	if (err < 0)
-		sbi_printf(
-			"Device Tree can't be expanded to accmodate new node");
 
 	chosen_offset = fdt_path_offset(fdt, "/chosen");
 	fdt_setprop_string(fdt, chosen_offset, "stdout-path",
@@ -197,7 +199,6 @@ const struct sbi_platform_operations platform_ops = {
 	.console_init		= fu540_console_init,
 	.irqchip_init		= fu540_irqchip_init,
 	.ipi_send		= clint_ipi_send,
-	.ipi_sync		= clint_ipi_sync,
 	.ipi_clear		= clint_ipi_clear,
 	.ipi_init		= fu540_ipi_init,
 	.timer_value		= clint_timer_value,

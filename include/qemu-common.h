@@ -61,7 +61,6 @@ int qemu_openpty_raw(int *aslave, char *pty_name);
 
 void cpu_exec_init_all(void);
 void cpu_exec_step_atomic(CPUState *cpu);
-void cpu_exec_step_atomic_pf(CPUState *cpu);
 
 /**
  * set_preferred_target_page_bits:
@@ -74,6 +73,12 @@ void cpu_exec_step_atomic_pf(CPUState *cpu);
  * choice of page size and the requested page size is smaller than that).
  */
 bool set_preferred_target_page_bits(int bits);
+
+/**
+ * finalize_target_page_bits:
+ * Commit the final value set by set_preferred_target_page_bits.
+ */
+void finalize_target_page_bits(void);
 
 /**
  * Sends a (part of) iovec down a socket, yielding when the socket is full, or
@@ -124,7 +129,6 @@ void qemu_hexdump(const char *buf, FILE *fp, const char *prefix, size_t size);
 int parse_debug_env(const char *name, int max, int initial);
 
 const char *qemu_ether_ntoa(const MACAddr *mac);
-char *size_to_str(uint64_t val);
 void page_size_init(void);
 
 /* returns non-zero if dump is in progress, otherwise zero is

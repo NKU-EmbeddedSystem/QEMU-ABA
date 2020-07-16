@@ -164,6 +164,11 @@ static int xscom_clear_error(uint32_t gcid, uint32_t pcb_addr)
 	if (proc_gen != proc_gen_p9)
 		return 0;
 
+/* xscom clear address range/mask */
+#define XSCOM_CLEAR_RANGE_START		0x20010A00
+#define XSCOM_CLEAR_RANGE_END		0x20010ABF
+#define XSCOM_CLEAR_RANGE_MASK		0x200FFBFF
+
 	/*
 	 * Due to a hardware issue where core responding to scom was delayed
 	 * due to thread reconfiguration, leaves the scom logic in a state
@@ -724,7 +729,7 @@ int64_t xscom_read_cfam_chipid(uint32_t partid, uint32_t *chip_id)
 	 */
 	if (chip_quirk(QUIRK_NO_F000F)) {
 		if (proc_gen == proc_gen_p9)
-			val = 0x200D104980000000UL; /* P9 Nimbus DD2.0 */
+			val = 0x203D104980000000UL; /* P9 Nimbus DD2.3 */
 		else
 			val = 0x221EF04980000000UL; /* P8 Murano DD2.1 */
 	} else
@@ -751,14 +756,6 @@ static void xscom_init_chip_info(struct proc_chip *chip)
 
 	/* Identify chip */
 	switch(val & 0xff) {
-	case 0xf9:
-		chip->type = PROC_CHIP_P7;
-		assert(proc_gen == proc_gen_p7);
-		break;
-	case 0xe8:
-		chip->type = PROC_CHIP_P7P;
-		assert(proc_gen == proc_gen_p7);
-		break;
 	case 0xef:
 		chip->type = PROC_CHIP_P8_MURANO;
 		assert(proc_gen == proc_gen_p8);
@@ -833,30 +830,8 @@ int64_t xscom_trigger_xstop(void)
 	int rc = OPAL_UNSUPPORTED;
 	bool xstop_disabled = false;
 
-	/*
-	 * Workaround until we iron out all checkstop issues at present.
-	 *
-	 * For p9:
-	 * By default do not trigger sw checkstop unless explicitly enabled
-	 * through nvram option 'opal-sw-xstop=enable'.
-	 *
-	 * For p8:
-	 * Keep it enabled by default unless explicitly disabled.
-	 *
-	 * NOTE: Once all checkstop issues are resolved/stabilized reverse
-	 * the logic to enable sw checkstop by default on p9.
-	 */
-	switch (proc_gen) {
-	case proc_gen_p8:
-		if (nvram_query_eq("opal-sw-xstop", "disable"))
-			xstop_disabled = true;
-		break;
-	case proc_gen_p9:
-	default:
-		if (!nvram_query_eq("opal-sw-xstop", "enable"))
-			xstop_disabled = true;
-		break;
-	}
+	if (nvram_query_eq_dangerous("opal-sw-xstop", "disable"))
+		xstop_disabled = true;
 
 	if (xstop_disabled) {
 		prlog(PR_NOTICE, "Software initiated checkstop disabled.\n");
@@ -881,7 +856,7 @@ void xscom_init(void)
 		struct proc_chip *chip;
 		const char *chip_name;
 		static const char *chip_names[] = {
-			"UNKNOWN", "P7", "P7+", "P8E", "P8", "P8NVL", "P9N", "P9C"
+			"UNKNOWN", "P8E", "P8", "P8NVL", "P9N", "P9C", "P9P"
 		};
 
 		chip = get_chip(gcid);

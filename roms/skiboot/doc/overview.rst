@@ -1,8 +1,10 @@
 Skiboot overview
 ================
 
-Skiboot is firmware, loaded by the FSP. Along with loading the bootloader,
-it provides some runtime services to the OS (typically Linux).
+Skiboot is boot and runtime firmware for OpenPOWER systems.
+It's loaded by earlier boot firmware (typically Hostboot).
+Along with loading the bootloader, it provides some runtime
+services to the OS (typically Linux).
 
 Source layout
 -------------
@@ -123,7 +125,7 @@ Interrupts
 
 We don't directly handle interrupts in skiboot. The OS is in complete control,
 and any interrupts we need to process are first received by the OS. The
-:ref:`opal-handle-interrupt` call is made by the OS for OPAL to do what's
+:ref:`OPAL_HANDLE_INTERRUPT` call is made by the OS for OPAL to do what's
 needed.
 
 Memory

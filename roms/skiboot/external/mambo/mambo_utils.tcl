@@ -402,12 +402,14 @@ proc bt { {sp 0} } {
     upvar #0 target_p p
 
     set lr [mysim cpu $p:$c:$t display spr pc]
-    puts "pc:\t\t\t\t$lr"
+    set sym [addr2func $lr]
+    puts "pc:\t\t\t\t$lr\t$sym"
     if { $sp == 0 } {
         set sp [mysim cpu $p:$c:$t display gpr 1]
     }
     set lr [mysim cpu $p:$c:$t display spr lr]
-    puts "lr:\t\t\t\t$lr"
+    set sym [addr2func $lr]
+    puts "lr:\t\t\t\t$lr\t$sym"
 
     set msr [mysim cpu $p:$c:$t display spr msr]
     set le [ expr $msr & 1 ]
@@ -417,7 +419,8 @@ proc bt { {sp 0} } {
         set pa [ mysim cpu $p:$c:$t util dtranslate $sp ]
         set bc [ mem_display_64 $pa $le ]
         set lr [ mem_display_64 [ expr $pa + 16 ] $le ]
-        puts "stack:$pa \t$lr"
+        set sym [addr2func $lr]
+        puts "stack:$pa \t$lr\t$sym"
         if { $bc == 0 } { break }
         set sp $bc
     }
@@ -467,6 +470,55 @@ proc skisym { name } {
     }
 
     return $ret
+}
+
+proc addr2func { addr } {
+    global skiboot_symbol_list
+    global linux_symbol_list
+    global user_symbol_list
+    global mconf
+
+    set prevname ""
+    set preva "0"
+
+    if { [ info exists linux_symbol_list ] && "$addr" >= 0xc000000000000000} {
+	foreach line $linux_symbol_list {
+	    lassign $line a type name
+	    if { "0x$a" > $addr } {
+		set o [format "0x%x" [expr $addr - "0x$preva"]]
+		return "$prevname+$o"
+	    }
+	    set prevname $name
+	    set preva $a
+	}
+    }
+    # Assume skiboot is less that 4MB big
+    if { [ info exists skiboot_symbol_list ] &&
+	 "$addr" >  $mconf(boot_load) && "$addr" <  [expr $mconf(boot_load) + 4194304] } {
+	set mapaddr [expr $addr - $mconf(boot_load)]
+
+	foreach line $skiboot_symbol_list {
+	    lassign $line a type name
+	    if { "0x$a" > $mapaddr } {
+		set o [format "0x%x" [expr $mapaddr - "0x$preva"]]
+		return "$prevname+$o"
+	    }
+	    set prevname $name
+	    set preva $a
+	}
+    }
+    if { [ info exists user_symbol_list ]  } {
+	foreach line $user_symbol_list {
+	    lassign $line a type name
+	    if { "0x$a" > $addr } {
+		set o [format "0x%x" [expr $addr - "0x$preva"]]
+		return "$prevname+$o"
+	    }
+	    set prevname $name
+	    set preva $a
+	}
+    }
+    return "+$addr"
 }
 
 proc current_insn { { t -1 } { c -1 } { p -1 }} {

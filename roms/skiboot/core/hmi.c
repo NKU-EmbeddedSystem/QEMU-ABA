@@ -22,6 +22,7 @@
 #include <processor.h>
 #include <chiptod.h>
 #include <xscom.h>
+#include <xscom-p8-regs.h>
 #include <xscom-p9-regs.h>
 #include <pci.h>
 #include <cpu.h>
@@ -162,31 +163,6 @@
 		((((1UL) << (t_count)) - 1) << ((s_id) * (t_count)))
 #define SINGLE_THREAD_MASK(t_id)	((1UL) << (t_id))
 
-/* xscom addresses for core FIR (Fault Isolation Register) */
-#define P8_CORE_FIR		0x10013100
-#define P9_CORE_FIR		0x20010A40
-
-/* And core WOF (Whose On First) */
-#define P9_CORE_WOF		0x20010A48
-
-/* xscom addresses for pMisc Receive Malfunction Alert Register */
-#define P8_MALFUNC_ALERT	0x02020011
-#define P9_MALFUNC_ALERT	0x00090022
-
-#define P8_NX_STATUS_REG	0x02013040 /* NX status register */
-#define P8_NX_DMA_ENGINE_FIR	0x02013100 /* DMA & Engine FIR Data Register */
-#define P8_NX_PBI_FIR		0x02013080 /* PowerBus Interface FIR Register */
-
-#define P9_NX_STATUS_REG	0x02011040 /* NX status register */
-#define P9_NX_DMA_ENGINE_FIR	0x02011100 /* DMA & Engine FIR Data Register */
-#define P9_NX_PBI_FIR		0x02011080 /* PowerBus Interface FIR Register */
-
-/*
- * Bit 54 from NX status register is set to 1 when HMI interrupt is triggered
- * due to NX checksop.
- */
-#define NX_HMI_ACTIVE		PPC_BIT(54)
-
 /*
  * Number of iterations for the various timeouts. We can't use the timebase
  * as it might be broken. We measured experimentally that 40 millions loops
@@ -312,7 +288,7 @@ static int setup_scom_addresses(void)
 
 static int queue_hmi_event(struct OpalHMIEvent *hmi_evt, int recover, uint64_t *out_flags)
 {
-	size_t num_params;
+	size_t size;
 
 	/* Don't queue up event if recover == -1 */
 	if (recover == -1)
@@ -331,13 +307,13 @@ static int queue_hmi_event(struct OpalHMIEvent *hmi_evt, int recover, uint64_t *
 	 * num_params divide the struct size by 8 bytes to get exact
 	 * num_params value.
 	 */
-	num_params = ALIGN_UP(sizeof(*hmi_evt), sizeof(u64)) / sizeof(u64);
+	size = ALIGN_UP(sizeof(*hmi_evt), sizeof(u64));
 
 	*out_flags |= OPAL_HMI_FLAGS_NEW_EVENT;
 
 	/* queue up for delivery to host. */
 	return _opal_queue_msg(OPAL_MSG_HMI_EVT, NULL, NULL,
-				num_params, (uint64_t *)hmi_evt);
+				size, hmi_evt);
 }
 
 static int read_core_fir(uint32_t chip_id, uint32_t core_id, uint64_t *core_fir)
@@ -594,64 +570,50 @@ static void find_nx_checkstop_reason(int flat_chip_id,
 	queue_hmi_event(hmi_evt, 0, out_flags);
 }
 
-/*
- * If the year is 2018 and you still see all these hardcoded, you
- * should really replace this with the neat macros that's in the
- * NPU2 code rather than this horrible listing of every single
- * NPU2 register hardcoded for a specific chip.
- *
- * I feel dirty having even written it.
- */
-static uint32_t npu2_scom_dump[] = {
-	0x5011017, 0x5011047, 0x5011077, 0x50110A7,
-	0x5011217, 0x5011247, 0x5011277, 0x50112A7,
-	0x5011417, 0x5011447, 0x5011477, 0x50114A7,
-	0x50110DA, 0x50112DA, 0x50114DA,
-	0x50110DB, 0x50112DB, 0x50114DB,
-	0x5011011, 0x5011041, 0x5011071, 0x50110A1,
-	0x5011211, 0x5011241, 0x5011271, 0x50112A1,
-	0x5011411, 0x5011441, 0x5011471, 0x50114A1,
-	0x5011018, 0x5011048, 0x5011078, 0x50110A8,
-	0x5011218, 0x5011248, 0x5011278, 0x50112A8,
-	0x5011418, 0x5011448, 0x5011478, 0x50114A8,
-	0x5011640,
-	0x5011114, 0x5011134, 0x5011314, 0x5011334,
-	0x5011514, 0x5011534, 0x5011118, 0x5011138,
-	0x5011318, 0x5011338, 0x5011518, 0x5011538,
-	0x50110D8, 0x50112D8, 0x50114D8,
-	0x50110D9, 0x50112D9, 0x50114D9,
-	0x5011019, 0x5011049, 0x5011079, 0x50110A9,
-	0x5011219, 0x5011249, 0x5011279, 0x50112A9,
-	0x5011419, 0x5011449, 0x5011479, 0x50114A9,
-	0x50110F4, 0x50112F4, 0x50114F4,
-	0x50110F5, 0x50112F5, 0x50114F5,
-	0x50110F6, 0x50112F6, 0x50114F6,
-	0x50110FD, 0x50112FD, 0x50114FD,
-	0x50110FE, 0x50112FE, 0x50114FE,
-	0x00
-};
-
-static void dump_scoms(int flat_chip_id, const char *unit, uint32_t *scoms,
-			const char *loc)
-{
-	uint64_t value;
-	int r;
-
-	while (*scoms != 0) {
-		value = 0;
-		r = _xscom_read(flat_chip_id, *scoms, &value, false);
-		if (r != OPAL_SUCCESS)
-			continue;
-		prlog(PR_ERR, "%s: [Loc: %s] P:%d 0x%08x=0x%016llx\n",
-		      unit, loc, flat_chip_id, *scoms, value);
-		scoms++;
-	}
-}
-
 static bool phb_is_npu2(struct dt_node *dn)
 {
 	return (dt_node_is_compatible(dn, "ibm,power9-npu-pciex") ||
 		dt_node_is_compatible(dn, "ibm,power9-npu-opencapi-pciex"));
+}
+
+static void add_npu2_xstop_reason(uint32_t *xstop_reason, uint8_t reason)
+{
+	int i, reason_count;
+	uint8_t *ptr;
+
+	reason_count = sizeof(*xstop_reason) / sizeof(reason);
+	ptr = (uint8_t *) xstop_reason;
+	for (i = 0; i < reason_count; i++) {
+		if (*ptr == 0) {
+			*ptr = reason;
+			break;
+		}
+		ptr++;
+	}
+}
+
+static void encode_npu2_xstop_reason(uint32_t *xstop_reason,
+				uint64_t fir, int fir_number)
+{
+	int bit;
+	uint8_t reason;
+
+	/*
+	 * There are three 64-bit FIRs but the xstop reason field of
+	 * the hmi event is only 32-bit. Encode which FIR bit is set as:
+	 * - 2 bits for the FIR number
+	 * - 6 bits for the bit number (0 -> 63)
+	 *
+	 * So we could even encode up to 4 reasons for the HMI, if
+	 * that can ever happen
+	 */
+	while (fir) {
+		bit = ilog2(fir);
+		reason = fir_number << 6;
+		reason |= (63 - bit); // IBM numbering
+		add_npu2_xstop_reason(xstop_reason, reason);
+		fir ^= 1ULL << bit;
+	}
 }
 
 static void find_npu2_checkstop_reason(int flat_chip_id,
@@ -670,6 +632,7 @@ static void find_npu2_checkstop_reason(int flat_chip_id,
 	uint64_t npu2_fir_action0_addr;
 	uint64_t npu2_fir_action1_addr;
 	uint64_t fatal_errors;
+	uint32_t xstop_reason = 0;
 	int total_errors = 0;
 	const char *loc;
 
@@ -713,6 +676,8 @@ static void find_npu2_checkstop_reason(int flat_chip_id,
 			prlog(PR_ERR, "NPU: [Loc: %s] P:%d ACTION0 0x%016llx, ACTION1 0x%016llx\n",
 					loc, flat_chip_id, npu2_fir_action0, npu2_fir_action1);
 			total_errors++;
+
+			encode_npu2_xstop_reason(&xstop_reason, fatal_errors, i);
 		}
 
 		/* Can't do a fence yet, we are just logging fir information for now */
@@ -726,16 +691,14 @@ static void find_npu2_checkstop_reason(int flat_chip_id,
 	if (!total_errors)
 		return;
 
-	npu2_hmi_verbose = nvram_query_eq("npu2-hmi-verbose", "true");
+	npu2_hmi_verbose = nvram_query_eq_safe("npu2-hmi-verbose", "true");
 	/* Force this for now until we sort out something better */
 	npu2_hmi_verbose = true;
 
 	if (npu2_hmi_verbose) {
-		_xscom_lock();
-		dump_scoms(flat_chip_id, "NPU", npu2_scom_dump, loc);
-		_xscom_unlock();
+		npu2_dump_scoms(flat_chip_id);
 		prlog(PR_ERR, " _________________________ \n");
-		prlog(PR_ERR, "< It's Driver Debug time! >\n");
+		prlog(PR_ERR, "<    It's Debug time!     >\n");
 		prlog(PR_ERR, " ------------------------- \n");
 		prlog(PR_ERR, "       \\   ,__,            \n");
 		prlog(PR_ERR, "        \\  (oo)____        \n");
@@ -747,6 +710,7 @@ static void find_npu2_checkstop_reason(int flat_chip_id,
 	hmi_evt->severity = OpalHMI_SEV_WARNING;
 	hmi_evt->type = OpalHMI_ERROR_MALFUNC_ALERT;
 	hmi_evt->u.xstop_error.xstop_type = CHECKSTOP_TYPE_NPU;
+	hmi_evt->u.xstop_error.xstop_reason = xstop_reason;
 	hmi_evt->u.xstop_error.u.chip_id = flat_chip_id;
 
 	/* Marking the event as recoverable so that we don't crash */
@@ -1156,6 +1120,9 @@ static int handle_tfac_errors(struct OpalHMIEvent *hmi_evt, uint64_t *out_flags)
 	int recover = -1;
 	uint64_t tfmr = mfspr(SPR_TFMR);
 
+	/* Initialize the hmi event with old value of TFMR */
+	hmi_evt->tfmr = tfmr;
+
 	/* A TFMR parity/corrupt error makes us ignore all the local stuff.*/
 	if (tfmr & SPR_TFMR_TFMR_CORRUPT) {
 		/* Mark TB as invalid for now as we don't trust TFMR, we'll fix
@@ -1216,7 +1183,6 @@ static int handle_tfac_errors(struct OpalHMIEvent *hmi_evt, uint64_t *out_flags)
 	if (recover != -1 && hmi_evt) {
 		hmi_evt->severity = OpalHMI_SEV_ERROR_SYNC;
 		hmi_evt->type = OpalHMI_ERROR_TFAC;
-		hmi_evt->tfmr = tfmr;
 		queue_hmi_event(hmi_evt, recover, out_flags);
 	}
 

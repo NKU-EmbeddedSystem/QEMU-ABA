@@ -203,6 +203,8 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define NPU2_PERF_MASK				0x110
 #define NPU2_DBG0_CFG				0x118
 #define NPU2_DBG1_CFG				0x120
+#define NPU2_C_ERR_RPT_MSG5			0x128
+#define NPU2_C_ERR_RPT_MSG6			0x130
 
 /* CTL block registers */
 #define NPU2_CQ_CTL_MISC_CFG			0x000
@@ -237,6 +239,13 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define NPU2_CQ_CTL_STATUS			0x090
 #define   NPU2_CQ_CTL_STATUS_BRK0_AM_FENCED	PPC_BITMASK(48, 49)
 #define   NPU2_CQ_CTL_STATUS_BRK1_AM_FENCED	PPC_BITMASK(50, 51)
+#define NPU2_CQ_CTL_MISC_PA0_CONFIG		0x0A0 /* or should that be CS */
+#define NPU2_CQ_CTL_MISC_PA1_CONFIG		0x0A8 /* or should that be CS */
+#define   NPU2_CQ_CTL_MISC_PA_CONFIG_MEMSELMATCH PPC_BITMASK(0,2)
+#define   NPU2_CQ_CTL_MISC_PA_CONFIG_GRANULE	PPC_BIT(3)
+#define   NPU2_CQ_CTL_MISC_PA_CONFIG_SIZE	PPC_BITMASK(4,7)
+#define   NPU2_CQ_CTL_MISC_PA_CONFIG_MODE	PPC_BITMASK(8,11)
+#define   NPU2_CQ_CTL_MISC_PA_CONFIG_MASK	PPC_BITMASK(13,19)
 #define NPU2_CQ_C_ERR_RPT_MSG0			0x0C0
 #define NPU2_CQ_C_ERR_RPT_MSG1			0x0C8
 #define NPU2_CQ_C_ERR_RPT_FIRST0		0x0D0
@@ -295,10 +304,12 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define NPU2_NTL_MISC_CFG3(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x008)
 #define NPU2_NTL_ERR_HOLD1(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x010)
 #define NPU2_NTL_ERR_MASK1(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x018)
+#define NPU2_NTL_ERR_FIRST1_OFF			0x020
 #define NPU2_NTL_ERR_FIRST1(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x020)
 #define NPU2_NTL_ERR_FIRST1_MASK(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x028)
 #define NPU2_NTL_ERR_HOLD2(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x030)
 #define NPU2_NTL_ERR_MASK2(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x038)
+#define NPU2_NTL_ERR_FIRST2_OFF			0x040
 #define NPU2_NTL_ERR_FIRST2(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x040)
 #define NPU2_NTL_ERR_FIRST2_MASK(ndev)		NPU2_NTL_REG_OFFSET(ndev, 0x048)
 #define NPU2_NTL_SCRATCH2(ndev)			NPU2_NTL_REG_OFFSET(ndev, 0x050)
@@ -402,6 +413,12 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define NPU2_OTL_OSL_DAR(stack, block)		NPU2_REG_OFFSET(stack, block, 0x008)
 #define NPU2_OTL_OSL_TFC(stack, block)		NPU2_REG_OFFSET(stack, block, 0x010)
 #define NPU2_OTL_OSL_PEHANDLE(stack, block)	NPU2_REG_OFFSET(stack, block, 0x018)
+#define NPU2_OTL_ERR_RPT_HOLD0			0x30
+#define NPU2_OTL_RAS_ERR_MSG0			0x68
+#define NPU2_OTL_RXI_ERR_SIG			0x70
+#define NPU2_OTL_RXO_ERR_SIG			0x78
+#define NPU2_OTL_ERR_RPT_HOLD1			0xB0
+
 
 /* Misc block registers. Unlike the SM/CTL/DAT/NTL registers above
  * there is only a single instance of each of these in the NPU so we
@@ -480,10 +497,13 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define NPU2_MISC_IRQ_LOG13			NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, 0x368)
 #define NPU2_MISC_IRQ_LOG14			NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, 0x370)
 #define NPU2_MISC_IRQ_LOG15			NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, 0x378)
+#define NPU2_MISC_FENCE_ENABLE2			NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, 0x400)
 #define NPU2_MISC_IRQ_ENABLE2			NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, 0x408)
 
 /* Misc register, direct access only */
-#define NPU2_MISC_FIR_MASK1		0x2C43
+#define NPU2_MISC_FIR0_MASK		0x2C03
+#define NPU2_MISC_FIR1_MASK		0x2C43
+#define NPU2_MISC_FIR2_MASK		0x2C83
 
 /* ATS block registers */
 #define NPU2_ATS_PMU_CTL			NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_ATS, 0x000)
@@ -725,10 +745,28 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define    PU_IOE_PB_FP_CFG_FP1_FMR_DISABLE	PPC_BIT(52)
 #define    PU_IOE_PB_FP_CFG_FP1_PRS_DISABLE	PPC_BIT(57)
 
-#define OB0_ODL0_CONFIG				0x901082A
-#define OB0_ODL1_CONFIG				0x901082B
-#define OB3_ODL0_CONFIG				0xC01082A
-#define OB3_ODL1_CONFIG				0xC01082B
+#define OB_DLL_PERF_MONITOR_CONFIG(brick_index) \
+	(0x901081C + ((brick_index - 2) >> 1) * 0x3000000)
+#define   OB_DLL_PERF_MONITOR_CONFIG_ENABLE	PPC_BITMASK(0, 1)
+#define   OB_DLL_PERF_MONITOR_CONFIG_LINK0	0b10
+#define   OB_DLL_PERF_MONITOR_CONFIG_LINK1	0b01
+#define   OB_DLL_PERF_MONITOR_CONFIG_SIZE	PPC_BITMASK(16, 23)
+#define   OB_DLL_PERF_MONITOR_CONFIG_SIZE16	0xFF
+#define OB_DLL_PERF_MONITOR_SELECT(brick_index) \
+	(0x901081D + ((brick_index - 2) >> 1) * 0x3000000)
+#define   OB_DLL_PERF_MONITOR_SELECT_COUNTER	PPC_BITMASK(0, 7)
+#define   OB_DLL_PERF_MONITOR_SELECT_CRC_ODL	0x44
+#define   OB_DLL_PERF_MONITOR_SELECT_CRC_DLX	0x45
+#define OB_DLL_PERF_COUNTER0(brick_index) \
+	(0x901081E + ((brick_index - 2) >> 1) * 0x3000000)
+#define   OB_DLL_PERF_COUNTER0_VAL		PPC_BITMASK(0, 31)
+
+
+#define OB_ODL_OFFSET(brick_index) \
+	((((brick_index - 2) >> 1) * 0x3000000) + ((brick_index == 3 || brick_index == 4) ? 1 : 0))
+
+#define OB_ODL_CONFIG(brick_index) \
+	(0x901082A + OB_ODL_OFFSET(brick_index))
 #define   OB_ODL_CONFIG_RESET			PPC_BIT(0)
 #define   OB_ODL_CONFIG_VERSION			PPC_BITMASK(2, 7)
 #define   OB_ODL_CONFIG_TRAIN_MODE		PPC_BITMASK(8, 11)
@@ -737,26 +775,17 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define   OB_ODL_CONFIG_PHY_CNTR_LIMIT		PPC_BITMASK(20, 23)
 #define   OB_ODL_CONFIG_DEBUG_ENABLE		PPC_BIT(33)
 #define   OB_ODL_CONFIG_FWD_PROGRESS_TIMER	PPC_BITMASK(40, 43)
-
-#define OB0_ODL0_STATUS				0x901082C
-#define OB0_ODL1_STATUS				0x901082D
-#define OB3_ODL0_STATUS				0xC01082C
-#define OB3_ODL1_STATUS				0xC01082D
+#define OB_ODL_STATUS(brick_index) \
+	(0x901082C + OB_ODL_OFFSET(brick_index))
 #define   OB_ODL_STATUS_TRAINED_MODE		PPC_BITMASK(0,3)
 #define   OB_ODL_STATUS_RX_TRAINED_LANES	PPC_BITMASK(16, 23)
 #define   OB_ODL_STATUS_TX_TRAINED_LANES	PPC_BITMASK(24, 31)
 #define   OB_ODL_STATUS_TRAINING_STATE_MACHINE	PPC_BITMASK(49, 51)
-
-#define OB0_ODL0_TRAINING_STATUS		0x901082E
-#define OB0_ODL1_TRAINING_STATUS		0x901082F
-#define OB3_ODL0_TRAINING_STATUS		0xC01082E
-#define OB3_ODL1_TRAINING_STATUS		0xC01082F
+#define OB_ODL_TRAINING_STATUS(brick_index) \
+	(0x901082E + OB_ODL_OFFSET(brick_index))
 #define   OB_ODL_TRAINING_STATUS_STS_RX_PATTERN_B PPC_BITMASK(8, 15)
-
-#define OB0_ODL0_ENDPOINT_INFO			0x9010832
-#define OB0_ODL1_ENDPOINT_INFO			0x9010833
-#define OB3_ODL0_ENDPOINT_INFO			0xC010832
-#define OB3_ODL1_ENDPOINT_INFO			0xC010833
+#define OB_ODL_ENDPOINT_INFO(brick_index)		\
+	(0x9010832 + OB_ODL_OFFSET(brick_index))
 
 /* Registers and bits used to clear the L2 and L3 cache */
 #define L2_PRD_PURGE_CMD_REG 			0x1080E
@@ -768,5 +797,21 @@ void npu2_scom_write(uint64_t gcid, uint64_t scom_base,
 #define L3_PRD_PURGE_REQ			PPC_BIT(0)
 #define L3_PRD_PURGE_TTYPE_MASK 		PPC_BIT(1) | PPC_BIT(2) | PPC_BIT(3) | PPC_BIT(4)
 #define L3_FULL_PURGE				0x0
+
+#define L2_L3_PRD_PURGE_TIMEOUT_MS		20
+
+/* Config registers for NPU2 */
+#define NPU_STCK0_CS_SM0_MISC_CONFIG0		0x5011000
+#define NPU_STCK0_CS_SM1_MISC_CONFIG0		0x5011030
+#define NPU_STCK0_CS_SM2_MISC_CONFIG0		0x5011060
+#define NPU_STCK0_CS_SM3_MISC_CONFIG0		0x5011090
+#define NPU_STCK1_CS_SM0_MISC_CONFIG0		0x5011200
+#define NPU_STCK1_CS_SM1_MISC_CONFIG0		0x5011230
+#define NPU_STCK1_CS_SM2_MISC_CONFIG0		0x5011260
+#define NPU_STCK1_CS_SM3_MISC_CONFIG0		0x5011290
+#define NPU_STCK2_CS_SM0_MISC_CONFIG0		0x5011400
+#define NPU_STCK2_CS_SM1_MISC_CONFIG0		0x5011430
+#define NPU_STCK2_CS_SM2_MISC_CONFIG0		0x5011460
+#define NPU_STCK2_CS_SM3_MISC_CONFIG0		0x5011490
 
 #endif /* __NPU2_REGS_H */

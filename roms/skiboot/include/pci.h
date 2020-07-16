@@ -268,8 +268,6 @@ struct phb_ops {
 	int64_t (*err_inject)(struct phb *phb, uint64_t pe_number,
 			      uint32_t type, uint32_t func, uint64_t addr,
 			      uint64_t mask);
-	int64_t (*get_diag_data)(struct phb *phb, void *diag_buffer,
-				 uint64_t diag_buffer_len);
 	int64_t (*get_diag_data2)(struct phb *phb, void *diag_buffer,
 				  uint64_t diag_buffer_len);
 	int64_t (*next_error)(struct phb *phb, uint64_t *first_frozen_pe,
@@ -321,9 +319,6 @@ struct phb_ops {
 	int64_t (*set_xive_pe)(struct phb *phb, uint64_t pe_number,
 			       uint32_t xive_num);
 
-	int64_t (*get_xive_source)(struct phb *phb, uint32_t xive_num,
-				   int32_t *interrupt_source_number);
-
 	int64_t (*get_msi_32)(struct phb *phb, uint64_t mve_number,
 			      uint32_t xive_num, uint8_t msi_range,
 			      uint32_t *msi_address, uint32_t *message_data);
@@ -335,12 +330,6 @@ struct phb_ops {
 	int64_t (*ioda_reset)(struct phb *phb, bool purge);
 
 	int64_t (*papr_errinjct_reset)(struct phb *phb);
-
-	/*
-	 * P5IOC2 only
-	 */
-	int64_t (*set_phb_tce_memory)(struct phb *phb, uint64_t tce_mem_addr,
-				      uint64_t tce_mem_size);
 
 	/*
 	 * IODA2 PCI interfaces
@@ -378,6 +367,9 @@ enum phb_type {
 	phb_type_npu_v2,
 	phb_type_npu_v2_opencapi,
 };
+
+
+extern bool verbose_eeh;
 
 struct phb {
 	struct dt_node		*dt_node;

@@ -1,4 +1,4 @@
-/* Copyright 2014-2015 IBM Corp.
+/* Copyright 2014-2019 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,6 +39,8 @@ static uint64_t ipoll_status[MAX_CHIPS];
 static uint8_t _prd_msg_buf[sizeof(struct opal_prd_msg) +
 			    sizeof(struct prd_fw_msg)];
 static struct opal_prd_msg *prd_msg = (struct opal_prd_msg *)&_prd_msg_buf;
+static struct opal_prd_msg *prd_msg_fsp_req;
+static struct opal_prd_msg *prd_msg_fsp_notify;
 static bool prd_msg_inuse, prd_active;
 static struct dt_node *prd_node;
 static bool prd_enabled = false;
@@ -81,10 +83,11 @@ static uint64_t prd_ipoll_mask;
 
 static void send_next_pending_event(void);
 
-static void prd_msg_consumed(void *data)
+static void prd_msg_consumed(void *data, int status)
 {
 	struct opal_prd_msg *msg = data;
 	uint32_t proc;
+	int notify_status = OPAL_SUCCESS;
 	uint8_t event = 0;
 
 	lock(&events_lock);
@@ -112,6 +115,24 @@ static void prd_msg_consumed(void *data)
 		event = EVENT_OCC_RESET;
 		break;
 	case OPAL_PRD_MSG_TYPE_FIRMWARE_RESPONSE:
+		if (prd_msg_fsp_req) {
+			free(prd_msg_fsp_req);
+			prd_msg_fsp_req = NULL;
+		}
+		break;
+	case OPAL_PRD_MSG_TYPE_FIRMWARE_NOTIFY:
+		if (prd_msg_fsp_notify) {
+			free(prd_msg_fsp_notify);
+			prd_msg_fsp_notify = NULL;
+		}
+		if (status != 0) {
+			prlog(PR_DEBUG,
+			      "PRD: Failed to send FSP -> HBRT message\n");
+			notify_status = FSP_STATUS_GENERIC_FAILURE;
+		}
+		assert(platform.prd);
+		assert(platform.prd->msg_response);
+		platform.prd->msg_response(notify_status);
 		break;
 	case OPAL_PRD_MSG_TYPE_SBE_PASSTHROUGH:
 		proc = msg->sbe_passthrough.chip;
@@ -162,6 +183,7 @@ static void send_next_pending_event(void)
 {
 	struct proc_chip *chip;
 	uint32_t proc;
+	int rc;
 	uint8_t event;
 
 	assert(!prd_msg_inuse);
@@ -182,7 +204,6 @@ static void send_next_pending_event(void)
 	if (!event)
 		return;
 
-	prd_msg_inuse = true;
 	prd_msg->token = 0;
 	prd_msg->hdr.size = sizeof(*prd_msg);
 
@@ -211,9 +232,12 @@ static void send_next_pending_event(void)
 	 * We always need to handle PSI interrupts, but if the is PRD is
 	 * disabled then we shouldn't propagate PRD events to the host.
 	 */
-	if (prd_enabled)
-		_opal_queue_msg(OPAL_MSG_PRD, prd_msg, prd_msg_consumed, 4,
-				(uint64_t *)prd_msg);
+	if (prd_enabled) {
+		rc = _opal_queue_msg(OPAL_MSG_PRD, prd_msg, prd_msg_consumed,
+				     prd_msg->hdr.size, prd_msg);
+		if (!rc)
+			prd_msg_inuse = true;
+	}
 }
 
 static void __prd_event(uint32_t proc, uint8_t event)
@@ -306,6 +330,109 @@ void prd_fsp_occ_load_start(uint32_t proc)
 	prd_event(proc, EVENT_FSP_OCC_LOAD_START);
 }
 
+void prd_fw_resp_fsp_response(int status)
+{
+	struct prd_fw_msg *fw_resp;
+	uint64_t fw_resp_len_old;
+	int rc;
+	uint16_t hdr_size;
+	enum opal_msg_type msg_type = OPAL_MSG_PRD2;
+
+	lock(&events_lock);
+
+	/* In case of failure, return code is passed via generic_resp */
+	if (status != 0) {
+		fw_resp = (struct prd_fw_msg *)prd_msg_fsp_req->fw_resp.data;
+		fw_resp->type = cpu_to_be64(PRD_FW_MSG_TYPE_RESP_GENERIC);
+		fw_resp->generic_resp.status = cpu_to_be64(status);
+
+		fw_resp_len_old = prd_msg_fsp_req->fw_resp.len;
+		prd_msg_fsp_req->fw_resp.len = cpu_to_be64(PRD_FW_MSG_BASE_SIZE +
+						 sizeof(fw_resp->generic_resp));
+
+		/* Update prd message size */
+		hdr_size = be16_to_cpu(prd_msg_fsp_req->hdr.size);
+		hdr_size -= fw_resp_len_old;
+		hdr_size += be64_to_cpu(prd_msg_fsp_req->fw_resp.len);
+		prd_msg_fsp_req->hdr.size = cpu_to_be16(hdr_size);
+	}
+
+	/*
+	 * If prd message size is <= OPAL_MSG_FIXED_PARAMS_SIZE then use
+	 * OPAL_MSG_PRD to pass data to kernel. So that it works fine on
+	 * older kernel (which does not support OPAL_MSG_PRD2).
+	 */
+	if (prd_msg_fsp_req->hdr.size < OPAL_MSG_FIXED_PARAMS_SIZE)
+		msg_type = OPAL_MSG_PRD;
+
+	rc = _opal_queue_msg(msg_type, prd_msg_fsp_req, prd_msg_consumed,
+			     prd_msg_fsp_req->hdr.size, prd_msg_fsp_req);
+	if (!rc)
+		prd_msg_inuse = true;
+	unlock(&events_lock);
+}
+
+int prd_hbrt_fsp_msg_notify(void *data, u32 dsize)
+{
+	int size;
+	int rc = FSP_STATUS_GENERIC_FAILURE;
+	enum opal_msg_type msg_type = OPAL_MSG_PRD2;
+
+	if (!prd_enabled || !prd_active) {
+		prlog(PR_NOTICE, "PRD: PRD daemon is not ready\n");
+		return rc;
+	}
+
+	/* Calculate prd message size */
+	size =  sizeof(prd_msg->hdr) + sizeof(prd_msg->token) +
+		sizeof(prd_msg->fw_notify) + dsize;
+
+	if (size > OPAL_PRD_MSG_SIZE_MAX) {
+		prlog(PR_DEBUG, "PRD: FSP - HBRT notify message size (0x%x)"
+		      " is bigger than prd interface can handle\n", size);
+		return rc;
+	}
+
+	lock(&events_lock);
+
+	/* FSP - HBRT messages are serialized */
+	if (prd_msg_fsp_notify) {
+		prlog(PR_DEBUG, "PRD: FSP - HBRT notify message is busy\n");
+		goto unlock_events;
+	}
+
+	/* Handle message allocation */
+	prd_msg_fsp_notify = zalloc(size);
+	if (!prd_msg_fsp_notify) {
+		prlog(PR_DEBUG,
+		      "PRD: %s: Failed to allocate memory.\n", __func__);
+		goto unlock_events;
+	}
+
+	prd_msg_fsp_notify->hdr.type = OPAL_PRD_MSG_TYPE_FIRMWARE_NOTIFY;
+	prd_msg_fsp_notify->hdr.size = cpu_to_be16(size);
+	prd_msg_fsp_notify->token = 0;
+	prd_msg_fsp_notify->fw_notify.len = cpu_to_be64(dsize);
+	memcpy(&(prd_msg_fsp_notify->fw_notify.data), data, dsize);
+
+	/*
+	 * If prd message size is <= OPAL_MSG_FIXED_PARAMS_SIZE then use
+	 * OPAL_MSG_PRD to pass data to kernel. So that it works fine on
+	 * older kernel (which does not support OPAL_MSG_PRD2).
+	 */
+	if (prd_msg_fsp_notify->hdr.size < OPAL_MSG_FIXED_PARAMS_SIZE)
+		msg_type = OPAL_MSG_PRD;
+
+	rc = _opal_queue_msg(msg_type, prd_msg_fsp_notify,
+			     prd_msg_consumed, size, prd_msg_fsp_notify);
+	if (!rc)
+		prd_msg_inuse = true;
+
+unlock_events:
+	unlock(&events_lock);
+	return rc;
+}
+
 /* incoming message handlers */
 static int prd_msg_handle_attn_ack(struct opal_prd_msg *msg)
 {
@@ -363,9 +490,10 @@ static int prd_msg_handle_fini(void)
 
 static int prd_msg_handle_firmware_req(struct opal_prd_msg *msg)
 {
-	unsigned long fw_req_len, fw_resp_len;
+	unsigned long fw_req_len, fw_resp_len, data_len;
 	struct prd_fw_msg *fw_req, *fw_resp;
 	int rc;
+	uint64_t resp_msg_size;
 
 	fw_req_len = be64_to_cpu(msg->fw_req.req_len);
 	fw_resp_len = be64_to_cpu(msg->fw_req.resp_len);
@@ -403,9 +531,11 @@ static int prd_msg_handle_firmware_req(struct opal_prd_msg *msg)
 		rc = 0;
 		break;
 	case PRD_FW_MSG_TYPE_ERROR_LOG:
-		rc = hservice_send_error_log(fw_req->errorlog.plid,
-					     fw_req->errorlog.size,
-					     fw_req->errorlog.data);
+		assert(platform.prd);
+		assert(platform.prd->send_error_log);
+		rc = platform.prd->send_error_log(fw_req->errorlog.plid,
+						  fw_req->errorlog.size,
+						  fw_req->errorlog.data);
 		/* Return generic response to HBRT */
 		fw_resp->type = cpu_to_be64(PRD_FW_MSG_TYPE_RESP_GENERIC);
 		fw_resp->generic_resp.status = cpu_to_be64(rc);
@@ -414,17 +544,102 @@ static int prd_msg_handle_firmware_req(struct opal_prd_msg *msg)
 		prd_msg->hdr.size = cpu_to_be16(sizeof(*prd_msg));
 		rc = 0;
 		break;
+	case PRD_FW_MSG_TYPE_HBRT_FSP:
+		/*
+		 * HBRT -> FSP messages are serialized. Just to be sure check
+		 * whether fsp_req message is free or not.
+		 */
+		if (prd_msg_fsp_req) {
+			prlog(PR_DEBUG, "PRD: HBRT - FSP message is busy\n");
+			rc = OPAL_BUSY;
+			break;
+		}
+
+		/*
+		 * FSP interface doesn't tell us the response data size.
+		 * Hence pass response length = request length.
+		 */
+		resp_msg_size = sizeof(msg->hdr) + sizeof(msg->token) +
+			sizeof(msg->fw_resp) + fw_req_len;
+
+		if (resp_msg_size > OPAL_PRD_MSG_SIZE_MAX) {
+			prlog(PR_DEBUG, "PRD: HBRT - FSP response size (0x%llx)"
+			      " is bigger than prd interface can handle\n",
+			      resp_msg_size);
+			rc = OPAL_INTERNAL_ERROR;
+			break;
+		}
+
+		/*
+		 * We will use fsp_queue_msg() to pass HBRT data to FSP.
+		 * We cannot directly map kernel passed data as kernel
+		 * will release the memory as soon as we return the control.
+		 * Also FSP uses same memory to pass response to HBRT. Hence
+		 * lets copy data to local memory. Then pass this memory to
+		 * FSP via TCE mapping.
+		 */
+		prd_msg_fsp_req = zalloc(resp_msg_size);
+		if (!prd_msg_fsp_req) {
+			prlog(PR_DEBUG, "PRD: Failed to allocate memory "
+			      "for HBRT - FSP message\n");
+			rc = OPAL_RESOURCE;
+			break;
+		}
+
+		/* Update message header */
+		prd_msg_fsp_req->hdr.type = OPAL_PRD_MSG_TYPE_FIRMWARE_RESPONSE;
+		prd_msg_fsp_req->hdr.size = cpu_to_be16(resp_msg_size);
+		prd_msg_fsp_req->token = 0;
+		prd_msg_fsp_req->fw_resp.len = fw_req_len;
+
+		/* copy HBRT data to local memory */
+		fw_resp = (struct prd_fw_msg *)prd_msg_fsp_req->fw_resp.data;
+		memcpy(fw_resp, fw_req, fw_req_len);
+
+		/* Update response type */
+		fw_resp->type = cpu_to_be64(PRD_FW_MSG_TYPE_HBRT_FSP);
+
+		/* Get MBOX message size */
+		data_len = fw_req_len - PRD_FW_MSG_BASE_SIZE;
+
+		/* We have to wait until FSP responds */
+		prd_msg_inuse = false;
+		/* Unlock to avoid recursive lock issue */
+		unlock(&events_lock);
+
+		/* Send message to FSP */
+		assert(platform.prd);
+		assert(platform.prd->send_hbrt_msg);
+		rc = platform.prd->send_hbrt_msg(&(fw_resp->mbox_msg), data_len);
+
+		/*
+		 * Callback handler from hservice_send_hbrt_msg will take
+		 * care of sending response to HBRT. So just send return
+		 * code to Linux.
+		 */
+		if (rc == OPAL_SUCCESS)
+			return rc;
+
+		lock(&events_lock);
+		if (prd_msg_fsp_req) {
+			free(prd_msg_fsp_req);
+			prd_msg_fsp_req = NULL;
+		}
+		break;
 	default:
 		prlog(PR_DEBUG, "PRD: Unsupported fw_request type : 0x%llx\n",
 		      be64_to_cpu(fw_req->type));
 		rc = -ENOSYS;
 	}
 
-	if (!rc)
-		rc = _opal_queue_msg(OPAL_MSG_PRD, prd_msg, prd_msg_consumed, 4,
-				(uint64_t *) prd_msg);
-	else
+	if (!rc) {
+		rc = _opal_queue_msg(OPAL_MSG_PRD, prd_msg, prd_msg_consumed,
+				     prd_msg->hdr.size, prd_msg);
+		if (rc)
+			prd_msg_inuse = false;
+	} else {
 		prd_msg_inuse = false;
+	}
 
 	unlock(&events_lock);
 
@@ -460,16 +675,24 @@ static int64_t opal_prd_msg(struct opal_prd_msg *msg)
 		rc = prd_msg_handle_firmware_req(msg);
 		break;
 	case OPAL_PRD_MSG_TYPE_FSP_OCC_RESET_STATUS:
-		rc = fsp_occ_reset_status(msg->fsp_occ_reset_status.chip,
-					  msg->fsp_occ_reset_status.status);
+		assert(platform.prd);
+		assert(platform.prd->fsp_occ_reset_status);
+		rc = platform.prd->fsp_occ_reset_status(
+			msg->fsp_occ_reset_status.chip,
+			msg->fsp_occ_reset_status.status);
 		break;
 	case OPAL_PRD_MSG_TYPE_CORE_SPECIAL_WAKEUP:
-		rc = hservice_wakeup(msg->spl_wakeup.core,
-				     msg->spl_wakeup.mode);
+		assert(platform.prd);
+		assert(platform.prd->wakeup);
+		rc = platform.prd->wakeup(msg->spl_wakeup.core,
+					  msg->spl_wakeup.mode);
 		break;
 	case OPAL_PRD_MSG_TYPE_FSP_OCC_LOAD_START_STATUS:
-		rc = fsp_occ_load_start_status(msg->fsp_occ_reset_status.chip,
-					msg->fsp_occ_reset_status.status);
+		assert(platform.prd);
+		assert(platform.prd->fsp_occ_load_start_status);
+		rc = platform.prd->fsp_occ_load_start_status(
+			msg->fsp_occ_reset_status.chip,
+			msg->fsp_occ_reset_status.status);
 		break;
 	default:
 		prlog(PR_DEBUG, "PRD: Unsupported prd message type : 0x%x\n",

@@ -365,10 +365,6 @@ struct xive {
 	uint32_t	chip_id;
 	uint32_t	block_id;
 	struct dt_node	*x_node;
-	int		rev;
-#define XIVE_REV_UNKNOWN	0	/* Unknown version */
-#define XIVE_REV_1		1	/* P9 (Nimbus) DD1.x (not supported) */
-#define XIVE_REV_2		2	/* P9 (Nimbus) DD2.x or Cumulus */
 
 	uint64_t	xscom_base;
 
@@ -1397,9 +1393,19 @@ static int64_t xive_ivc_scrub(struct xive *x, uint64_t block, uint64_t idx)
 	return __xive_cache_scrub(x, xive_cache_ivc, block, idx, false, false);
 }
 
+static int64_t xive_vpc_scrub(struct xive *x, uint64_t block, uint64_t idx)
+{
+	return __xive_cache_scrub(x, xive_cache_vpc, block, idx, false, false);
+}
+
 static int64_t xive_vpc_scrub_clean(struct xive *x, uint64_t block, uint64_t idx)
 {
 	return __xive_cache_scrub(x, xive_cache_vpc, block, idx, true, false);
+}
+
+static int64_t xive_eqc_scrub(struct xive *x, uint64_t block, uint64_t idx)
+{
+	return __xive_cache_scrub(x, xive_cache_eqc, block, idx, false, false);
 }
 
 static int64_t __xive_cache_watch(struct xive *x, enum xive_cache_type ctype,
@@ -2826,15 +2832,20 @@ static struct xive *init_one_xive(struct dt_node *np)
 	chip = get_chip(x->chip_id);
 	assert(chip);
 
-	x->rev = XIVE_REV_UNKNOWN;
-	if (chip->type == PROC_CHIP_P9_NIMBUS) {
+	/* All supported P9 are revision 2 (Nimbus DD2) */
+	switch (chip->type) {
+	case PROC_CHIP_P9_NIMBUS:
+		/* We should not be able to boot a P9N DD1 */
 		assert((chip->ec_level & 0xf0) != 0x10);
-		x->rev = XIVE_REV_2;
-	} else if (chip->type == PROC_CHIP_P9_CUMULUS)
-		x->rev = XIVE_REV_2;
+		/* Fallthrough */
+	case PROC_CHIP_P9_CUMULUS:
+	case PROC_CHIP_P9P:
+		break;
+	default:
+		assert(0);
+	}
 
-	xive_dbg(x, "Initializing rev %d block ID %d...\n",
-		 x->rev, x->block_id);
+	xive_dbg(x, "Initializing block ID %d...\n", x->block_id);
 	chip->xive = x;
 
 #ifdef USE_INDIRECT
@@ -3016,7 +3027,7 @@ static bool xive_check_eq_update(struct xive *x, uint32_t idx, struct xive_eq *e
 
 	assert(eq_p);
 	eq2 = *eq_p;
-	if (memcmp(eq, &eq2, sizeof(eq)) != 0) {
+	if (memcmp(eq, &eq2, sizeof(struct xive_eq)) != 0) {
 		xive_err(x, "EQ update mismatch idx %d\n", idx);
 		xive_err(x, "want: %08x %08x %08x %08x\n",
 			 eq->w0, eq->w1, eq->w2, eq->w3);
@@ -3038,7 +3049,7 @@ static bool xive_check_vpc_update(struct xive *x, uint32_t idx, struct xive_vp *
 
 	assert(vp_p);
 	vp2 = *vp_p;
-	if (memcmp(vp, &vp2, sizeof(vp)) != 0) {
+	if (memcmp(vp, &vp2, sizeof(struct xive_vp)) != 0) {
 		xive_err(x, "VP update mismatch idx %d\n", idx);
 		xive_err(x, "want: %08x %08x %08x %08x\n",
 			 vp->w0, vp->w1, vp->w2, vp->w3);
@@ -4177,6 +4188,85 @@ static int64_t opal_xive_set_queue_info(uint64_t vp, uint32_t prio,
 	return rc;
 }
 
+static int64_t opal_xive_get_queue_state(uint64_t vp, uint32_t prio,
+					 uint32_t *out_qtoggle,
+					 uint32_t *out_qindex)
+{
+	uint32_t blk, idx;
+	struct xive *x;
+	struct xive_eq *eq;
+	int64_t rc;
+
+	if (xive_mode != XIVE_MODE_EXPL)
+		return OPAL_WRONG_STATE;
+
+	if (!out_qtoggle || !out_qindex ||
+	    !xive_eq_for_target(vp, prio, &blk, &idx))
+		return OPAL_PARAMETER;
+
+	x = xive_from_vc_blk(blk);
+	if (!x)
+		return OPAL_PARAMETER;
+
+	eq = xive_get_eq(x, idx);
+	if (!eq)
+		return OPAL_PARAMETER;
+
+	/* Scrub the queue */
+	lock(&x->lock);
+	rc = xive_eqc_scrub(x, blk, idx);
+	unlock(&x->lock);
+	if (rc)
+		return rc;
+
+	/* We don't do disable queues */
+	if (!(eq->w0 & EQ_W0_VALID))
+		return OPAL_WRONG_STATE;
+
+	*out_qtoggle = GETFIELD(EQ_W1_GENERATION, eq->w1);
+	*out_qindex  = GETFIELD(EQ_W1_PAGE_OFF, eq->w1);
+
+	return OPAL_SUCCESS;
+}
+
+static int64_t opal_xive_set_queue_state(uint64_t vp, uint32_t prio,
+					 uint32_t qtoggle, uint32_t qindex)
+{
+	uint32_t blk, idx;
+	struct xive *x;
+	struct xive_eq *eq, new_eq;
+	int64_t rc;
+
+	if (xive_mode != XIVE_MODE_EXPL)
+		return OPAL_WRONG_STATE;
+
+	if (!xive_eq_for_target(vp, prio, &blk, &idx))
+		return OPAL_PARAMETER;
+
+	x = xive_from_vc_blk(blk);
+	if (!x)
+		return OPAL_PARAMETER;
+
+	eq = xive_get_eq(x, idx);
+	if (!eq)
+		return OPAL_PARAMETER;
+
+	/* We don't do disable queues */
+	if (!(eq->w0 & EQ_W0_VALID))
+		return OPAL_WRONG_STATE;
+
+	new_eq = *eq;
+
+	new_eq.w1 = SETFIELD(EQ_W1_GENERATION, new_eq.w1, qtoggle);
+	new_eq.w1 = SETFIELD(EQ_W1_PAGE_OFF, new_eq.w1, qindex);
+
+	lock(&x->lock);
+	rc = xive_eqc_cache_update(x, blk, idx, 0, 4, &new_eq, false, false);
+	unlock(&x->lock);
+
+	return rc;
+}
+
 static int64_t opal_xive_donate_page(uint32_t chip_id, uint64_t addr)
 {
 	struct proc_chip *c = get_chip(chip_id);
@@ -4413,6 +4503,44 @@ static int64_t opal_xive_set_vp_info(uint64_t vp_id,
 bail:
 	unlock(&x->lock);
 	return rc;
+}
+
+static int64_t opal_xive_get_vp_state(uint64_t vp_id, uint64_t *out_state)
+{
+	struct xive *x;
+	struct xive_vp *vp;
+	uint32_t blk, idx;
+	int64_t rc;
+	bool group;
+
+	if (!out_state || !xive_decode_vp(vp_id, &blk, &idx, NULL, &group))
+		return OPAL_PARAMETER;
+	if (group)
+		return OPAL_PARAMETER;
+	x = xive_from_pc_blk(blk);
+	if (!x)
+		return OPAL_PARAMETER;
+	vp = xive_get_vp(x, idx);
+	if (!vp)
+		return OPAL_PARAMETER;
+
+	/* Scrub the vp */
+	lock(&x->lock);
+	rc = xive_vpc_scrub(x, blk, idx);
+	unlock(&x->lock);
+	if (rc)
+		return rc;
+
+	if (!(vp->w0 & VP_W0_VALID))
+		return OPAL_WRONG_STATE;
+
+	/*
+	 * Return word4 and word5 which contain the saved HW thread
+	 * context. The IPB register is all we care for now on P9.
+	 */
+	*out_state = (((uint64_t)vp->w4) << 32) | vp->w5;
+
+	return OPAL_SUCCESS;
 }
 
 static void xive_cleanup_cpu_tima(struct cpu_thread *c)
@@ -5336,5 +5464,8 @@ void init_xive(void)
 	opal_register(OPAL_XIVE_SET_VP_INFO, opal_xive_set_vp_info, 3);
 	opal_register(OPAL_XIVE_SYNC, opal_xive_sync, 2);
 	opal_register(OPAL_XIVE_DUMP, opal_xive_dump, 2);
+	opal_register(OPAL_XIVE_GET_QUEUE_STATE, opal_xive_get_queue_state, 4);
+	opal_register(OPAL_XIVE_SET_QUEUE_STATE, opal_xive_set_queue_state, 4);
+	opal_register(OPAL_XIVE_GET_VP_STATE, opal_xive_get_vp_state, 2);
 }
 

@@ -48,11 +48,9 @@
 #include <npu2.h>
 #include <npu2-regs.h>
 #include <phys-map.h>
-#include <xive.h>
 #include <i2c.h>
 #include <nvram.h>
 
-#define NPU_IRQ_LEVELS		35
 #define NPU_IRQ_LEVELS_XSL	23
 #define MAX_PE_HANDLE		((1 << 15) - 1)
 #define TL_MAX_TEMPLATE		63
@@ -68,7 +66,8 @@
 #define   OCAPI_SLOT_FRESET_INIT            (OCAPI_SLOT_FRESET + 2)
 #define   OCAPI_SLOT_FRESET_ASSERT_DELAY    (OCAPI_SLOT_FRESET + 3)
 #define   OCAPI_SLOT_FRESET_DEASSERT_DELAY  (OCAPI_SLOT_FRESET + 4)
-#define   OCAPI_SLOT_FRESET_INIT_DELAY      (OCAPI_SLOT_FRESET + 5)
+#define   OCAPI_SLOT_FRESET_DEASSERT_DELAY2 (OCAPI_SLOT_FRESET + 5)
+#define   OCAPI_SLOT_FRESET_INIT_DELAY      (OCAPI_SLOT_FRESET + 6)
 
 #define OCAPI_LINK_TRAINING_RETRIES	2
 #define OCAPI_LINK_TRAINING_TIMEOUT	3000 /* ms */
@@ -128,24 +127,11 @@ static inline uint64_t index_to_block(uint64_t index) {
 	}
 }
 
-static uint64_t get_odl_status(uint32_t gcid, uint64_t index) {
+static uint64_t get_odl_status(uint32_t gcid, uint64_t index)
+{
 	uint64_t reg, status_xscom;
-	switch (index) {
-	case 2:
-		status_xscom = OB0_ODL0_STATUS;
-		break;
-	case 3:
-		status_xscom = OB0_ODL1_STATUS;
-		break;
-	case 4:
-		status_xscom = OB3_ODL1_STATUS;
-		break;
-	case 5:
-		status_xscom = OB3_ODL0_STATUS;
-		break;
-	default:
-		assert(false);
-	}
+
+	status_xscom = OB_ODL_STATUS(index);
 	xscom_read(gcid, status_xscom, &reg);
 	return reg;
 }
@@ -154,22 +140,7 @@ static uint64_t get_odl_training_status(uint32_t gcid, uint64_t index)
 {
 	uint64_t status_xscom, reg;
 
-	switch (index) {
-	case 2:
-		status_xscom = OB0_ODL0_TRAINING_STATUS;
-		break;
-	case 3:
-		status_xscom = OB0_ODL1_TRAINING_STATUS;
-		break;
-	case 4:
-		status_xscom = OB3_ODL1_TRAINING_STATUS;
-		break;
-	case 5:
-		status_xscom = OB3_ODL0_TRAINING_STATUS;
-		break;
-	default:
-		assert(false);
-	}
+	status_xscom = OB_ODL_TRAINING_STATUS(index);
 	xscom_read(gcid, status_xscom, &reg);
 	return reg;
 }
@@ -178,22 +149,7 @@ static uint64_t get_odl_endpoint_info(uint32_t gcid, uint64_t index)
 {
 	uint64_t status_xscom, reg;
 
-	switch (index) {
-	case 2:
-		status_xscom = OB0_ODL0_ENDPOINT_INFO;
-		break;
-	case 3:
-		status_xscom = OB0_ODL1_ENDPOINT_INFO;
-		break;
-	case 4:
-		status_xscom = OB3_ODL1_ENDPOINT_INFO;
-		break;
-	case 5:
-		status_xscom = OB3_ODL0_ENDPOINT_INFO;
-		break;
-	default:
-		assert(false);
-	}
+	status_xscom = OB_ODL_ENDPOINT_INFO(index);
 	xscom_read(gcid, status_xscom, &reg);
 	return reg;
 }
@@ -304,6 +260,33 @@ static void set_transport_mux_controls(uint32_t gcid, uint32_t scom_base,
 	xscom_write(gcid, PU_IOE_PB_MISC_CFG, reg);
 }
 
+static void assert_odl_reset(uint32_t gcid, int index)
+{
+	uint64_t reg, config_xscom;
+
+	config_xscom = OB_ODL_CONFIG(index);
+	/* Reset ODL */
+	reg = OB_ODL_CONFIG_RESET;
+	reg = SETFIELD(OB_ODL_CONFIG_VERSION, reg, 0b000001);
+	reg = SETFIELD(OB_ODL_CONFIG_TRAIN_MODE, reg, 0b0110);
+	reg = SETFIELD(OB_ODL_CONFIG_SUPPORTED_MODES, reg, 0b0010);
+	reg |= OB_ODL_CONFIG_X4_BACKOFF_ENABLE;
+	reg = SETFIELD(OB_ODL_CONFIG_PHY_CNTR_LIMIT, reg, 0b1111);
+	reg |= OB_ODL_CONFIG_DEBUG_ENABLE;
+	reg = SETFIELD(OB_ODL_CONFIG_FWD_PROGRESS_TIMER, reg, 0b0110);
+	xscom_write(gcid, config_xscom, reg);
+}
+
+static void deassert_odl_reset(uint32_t gcid, int index)
+{
+	uint64_t reg, config_xscom;
+
+	config_xscom = OB_ODL_CONFIG(index);
+	xscom_read(gcid, config_xscom, &reg);
+	reg &= ~OB_ODL_CONFIG_RESET;
+	xscom_write(gcid, config_xscom, reg);
+}
+
 static void enable_odl_phy_mux(uint32_t gcid, int index)
 {
 	uint64_t reg;
@@ -322,6 +305,12 @@ static void enable_odl_phy_mux(uint32_t gcid, int index)
 	default:
 		assert(false);
 	}
+
+	/*
+	 * ODL must be in reset when enabling.
+	 * It stays in reset until the link is trained
+	 */
+	assert_odl_reset(gcid, index);
 
 	/* PowerBus OLL PHY Training Config Register */
 	xscom_read(gcid, phy_config_scom, &reg);
@@ -593,6 +582,20 @@ static void brick_config(uint32_t gcid, uint32_t scom_base, int index)
 	enable_pb_snooping(gcid, scom_base, index);
 }
 
+/* Procedure 13.1.3.4 - Brick to PE Mapping */
+static void pe_config(struct npu2_dev *dev)
+{
+	/* We currently use a fixed PE assignment per brick */
+	uint64_t val, reg;
+	val = NPU2_MISC_BRICK_BDF2PE_MAP_ENABLE;
+	val = SETFIELD(NPU2_MISC_BRICK_BDF2PE_MAP_PE, val, NPU2_OCAPI_PE(dev));
+	val = SETFIELD(NPU2_MISC_BRICK_BDF2PE_MAP_BDF, val, 0);
+	reg = NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC,
+			      NPU2_MISC_BRICK0_BDF2PE_MAP0 +
+			      (dev->brick_index * 0x18));
+	npu2_write(dev->npu, reg, val);
+}
+
 /* Procedure 13.1.3.5 - TL Configuration */
 static void tl_config(uint32_t gcid, uint32_t scom_base, uint64_t index)
 {
@@ -857,10 +860,9 @@ static void otl_enabletx(uint32_t gcid, uint32_t scom_base,
 	/* TODO: Abort if credits are zero */
 }
 
-static void assert_reset(struct npu2_dev *dev)
+static uint8_t get_reset_pin(struct npu2_dev *dev)
 {
-	uint8_t pin, data;
-	int rc;
+	uint8_t pin;
 
 	switch (dev->brick_index) {
 	case 2:
@@ -878,14 +880,25 @@ static void assert_reset(struct npu2_dev *dev)
 	default:
 		assert(false);
 	}
+	return pin;
+}
 
+static void assert_adapter_reset(struct npu2_dev *dev)
+{
+	uint8_t pin, data;
+	int rc;
+
+	pin = get_reset_pin(dev);
 	/*
 	 * set the i2c reset pin in output mode
 	 *
 	 * On the 9554 device, register 3 is the configuration
 	 * register and a pin is in output mode if its value is 0
 	 */
-	data = ~pin;
+	lock(&dev->npu->i2c_lock);
+	dev->npu->i2c_pin_mode &= ~pin;
+	data = dev->npu->i2c_pin_mode;
+
 	rc = i2c_request_send(dev->npu->i2c_port_id_ocapi,
 			platform.ocapi->i2c_reset_addr, SMBUS_WRITE,
 			0x3, 1,
@@ -894,16 +907,20 @@ static void assert_reset(struct npu2_dev *dev)
 		goto err;
 
 	/* register 1 controls the signal, reset is active low */
-	data = ~pin;
+	dev->npu->i2c_pin_wr_state &= ~pin;
+	data = dev->npu->i2c_pin_wr_state;
+
 	rc = i2c_request_send(dev->npu->i2c_port_id_ocapi,
 			platform.ocapi->i2c_reset_addr, SMBUS_WRITE,
 			0x1, 1,
 			&data, sizeof(data), 120);
 	if (rc)
 		goto err;
+	unlock(&dev->npu->i2c_lock);
 	return;
 
 err:
+	unlock(&dev->npu->i2c_lock);
 	/**
 	 * @fwts-label OCAPIDeviceResetFailed
 	 * @fwts-advice There was an error attempting to send
@@ -912,16 +929,22 @@ err:
 	OCAPIERR(dev, "Error writing I2C reset signal: %d\n", rc);
 }
 
-static void deassert_reset(struct npu2_dev *dev)
+static void deassert_adapter_reset(struct npu2_dev *dev)
 {
-	uint8_t data;
+	uint8_t pin, data;
 	int rc;
 
-	data = 0xFF;
+	pin = get_reset_pin(dev);
+
+	lock(&dev->npu->i2c_lock);
+	dev->npu->i2c_pin_wr_state |= pin;
+	data = dev->npu->i2c_pin_wr_state;
+
 	rc = i2c_request_send(dev->npu->i2c_port_id_ocapi,
 			platform.ocapi->i2c_reset_addr, SMBUS_WRITE,
 			0x1, 1,
 			&data, sizeof(data), 120);
+	unlock(&dev->npu->i2c_lock);
 	if (rc) {
 		/**
 		 * @fwts-label OCAPIDeviceResetFailed
@@ -932,63 +955,71 @@ static void deassert_reset(struct npu2_dev *dev)
 	}
 }
 
-static void reset_odl(uint32_t gcid, struct npu2_dev *dev)
+static void setup_perf_counters(struct npu2_dev *dev)
 {
-	uint64_t reg, config_xscom;
+	uint64_t addr, reg, link;
 
-	switch (dev->brick_index) {
-	case 2:
-		config_xscom = OB0_ODL0_CONFIG;
-		break;
-	case 3:
-		config_xscom = OB0_ODL1_CONFIG;
-		break;
-	case 4:
-		config_xscom = OB3_ODL1_CONFIG;
-		break;
-	case 5:
-		config_xscom = OB3_ODL0_CONFIG;
-		break;
-	default:
-		assert(false);
+	/*
+	 * setup the DLL perf counters to check CRC errors detected by
+	 * the NPU or the adapter.
+	 *
+	 * Counter 0: link 0/ODL0, CRC error detected by ODL
+	 * Counter 1: link 0/ODL0, CRC error detected by DLx
+	 * Counter 2: link 1/ODL1, CRC error detected by ODL
+	 * Counter 3: link 1/ODL1, CRC error detected by DLx
+	 */
+	if ((dev->brick_index == 2) || (dev->brick_index == 5))
+		link = 0;
+	else
+		link = 1;
+
+	addr = OB_DLL_PERF_MONITOR_CONFIG(dev->brick_index);
+	xscom_read(dev->npu->chip_id, addr, &reg);
+	if (link == 0) {
+		reg = SETFIELD(OB_DLL_PERF_MONITOR_CONFIG_ENABLE, reg,
+			OB_DLL_PERF_MONITOR_CONFIG_LINK0);
+		reg = SETFIELD(OB_DLL_PERF_MONITOR_CONFIG_ENABLE >> 2, reg,
+			OB_DLL_PERF_MONITOR_CONFIG_LINK0);
+	} else {
+		reg = SETFIELD(OB_DLL_PERF_MONITOR_CONFIG_ENABLE >> 4, reg,
+			OB_DLL_PERF_MONITOR_CONFIG_LINK1);
+		reg = SETFIELD(OB_DLL_PERF_MONITOR_CONFIG_ENABLE >> 6, reg,
+			OB_DLL_PERF_MONITOR_CONFIG_LINK1);
 	}
+	reg = SETFIELD(OB_DLL_PERF_MONITOR_CONFIG_SIZE, reg,
+		OB_DLL_PERF_MONITOR_CONFIG_SIZE16);
+	xscom_write(dev->npu->chip_id,
+		OB_DLL_PERF_MONITOR_CONFIG(dev->brick_index), reg);
+	OCAPIDBG(dev, "perf counter config %llx = %llx\n", addr, reg);
 
-	/* Reset ODL */
-	reg = OB_ODL_CONFIG_RESET;
-	reg = SETFIELD(OB_ODL_CONFIG_VERSION, reg, 0b000001);
-	reg = SETFIELD(OB_ODL_CONFIG_TRAIN_MODE, reg, 0b0110);
-	reg = SETFIELD(OB_ODL_CONFIG_SUPPORTED_MODES, reg, 0b0010);
-	reg |= OB_ODL_CONFIG_X4_BACKOFF_ENABLE;
-	reg = SETFIELD(OB_ODL_CONFIG_PHY_CNTR_LIMIT, reg, 0b1111);
-	reg |= OB_ODL_CONFIG_DEBUG_ENABLE;
-	reg = SETFIELD(OB_ODL_CONFIG_FWD_PROGRESS_TIMER, reg, 0b0110);
-	xscom_write(gcid, config_xscom, reg);
+	addr = OB_DLL_PERF_MONITOR_SELECT(dev->brick_index);
+	xscom_read(dev->npu->chip_id, addr, &reg);
+	reg = SETFIELD(OB_DLL_PERF_MONITOR_SELECT_COUNTER >> (link * 16),
+		reg, OB_DLL_PERF_MONITOR_SELECT_CRC_ODL);
+	reg = SETFIELD(OB_DLL_PERF_MONITOR_SELECT_COUNTER >> ((link * 16) + 8),
+		reg, OB_DLL_PERF_MONITOR_SELECT_CRC_DLX);
+	xscom_write(dev->npu->chip_id, addr, reg);
+	OCAPIDBG(dev, "perf counter select %llx = %llx\n", addr, reg);
+}
 
-	reg &= ~OB_ODL_CONFIG_RESET;
-	xscom_write(gcid, config_xscom, reg);
+static void check_perf_counters(struct npu2_dev *dev)
+{
+	uint64_t addr, reg, link0, link1;
+
+	addr = OB_DLL_PERF_COUNTER0(dev->brick_index);
+	xscom_read(dev->npu->chip_id, addr, &reg);
+	link0 = GETFIELD(PPC_BITMASK(0, 31), reg);
+	link1 = GETFIELD(PPC_BITMASK(32, 63), reg);
+	if (link0 || link1)
+		OCAPIERR(dev, "CRC error count link0=%08llx link1=%08llx\n",
+			link0, link1);
 }
 
 static void set_init_pattern(uint32_t gcid, struct npu2_dev *dev)
 {
 	uint64_t reg, config_xscom;
 
-	switch (dev->brick_index) {
-	case 2:
-		config_xscom = OB0_ODL0_CONFIG;
-		break;
-	case 3:
-		config_xscom = OB0_ODL1_CONFIG;
-		break;
-	case 4:
-		config_xscom = OB3_ODL1_CONFIG;
-		break;
-	case 5:
-		config_xscom = OB3_ODL0_CONFIG;
-		break;
-	default:
-		assert(false);
-	}
-
+	config_xscom = OB_ODL_CONFIG(dev->brick_index);
 	/* Transmit Pattern A */
 	xscom_read(gcid, config_xscom, &reg);
 	reg = SETFIELD(OB_ODL_CONFIG_TRAIN_MODE, reg, 0b0001);
@@ -999,23 +1030,7 @@ static void start_training(uint32_t gcid, struct npu2_dev *dev)
 {
 	uint64_t reg, config_xscom;
 
-	switch (dev->brick_index) {
-	case 2:
-		config_xscom = OB0_ODL0_CONFIG;
-		break;
-	case 3:
-		config_xscom = OB0_ODL1_CONFIG;
-		break;
-	case 4:
-		config_xscom = OB3_ODL1_CONFIG;
-		break;
-	case 5:
-		config_xscom = OB3_ODL0_CONFIG;
-		break;
-	default:
-		assert(false);
-	}
-
+	config_xscom = OB_ODL_CONFIG(dev->brick_index);
 	/* Start training */
 	xscom_read(gcid, config_xscom, &reg);
 	reg = SETFIELD(OB_ODL_CONFIG_TRAIN_MODE, reg, 0b1000);
@@ -1139,6 +1154,7 @@ static int64_t npu2_opencapi_poll_link(struct pci_slot *slot)
 	case OCAPI_SLOT_LINK_TRAINED:
 		otl_enabletx(chip_id, dev->npu->xscom_base, dev);
 		pci_slot_set_state(slot, OCAPI_SLOT_NORMAL);
+		check_perf_counters(dev);
 		dev->phb_ocapi.scan_map = 1;
 		return OPAL_SUCCESS;
 
@@ -1190,24 +1206,34 @@ static int64_t npu2_opencapi_freset(struct pci_slot *slot)
 		}
 		dev->train_need_fence = true;
 		slot->link_retries = OCAPI_LINK_TRAINING_RETRIES;
-		npu2_opencapi_phy_setup(dev);
+		npu2_opencapi_phy_reset(dev);
 		/* fall-through */
 	case OCAPI_SLOT_FRESET_INIT:
-		reset_odl(chip_id, dev);
-		assert_reset(dev);
+		assert_odl_reset(chip_id, dev->brick_index);
+		assert_adapter_reset(dev);
 		pci_slot_set_state(slot,
 				OCAPI_SLOT_FRESET_ASSERT_DELAY);
 		/* assert for 5ms */
 		return pci_slot_set_sm_timeout(slot, msecs_to_tb(5));
 
 	case OCAPI_SLOT_FRESET_ASSERT_DELAY:
-		deassert_reset(dev);
+		deassert_odl_reset(chip_id, dev->brick_index);
 		pci_slot_set_state(slot,
 				OCAPI_SLOT_FRESET_DEASSERT_DELAY);
-		/* give another 5ms to device to be ready */
-		return pci_slot_set_sm_timeout(slot, msecs_to_tb(5));
+		/*
+		 * Minimal delay before taking adapter out of
+		 * reset. Could be useless, but doesn't hurt
+		 */
+		return pci_slot_set_sm_timeout(slot, msecs_to_tb(1));
 
 	case OCAPI_SLOT_FRESET_DEASSERT_DELAY:
+		deassert_adapter_reset(dev);
+		pci_slot_set_state(slot,
+				OCAPI_SLOT_FRESET_DEASSERT_DELAY2);
+		/* give 250ms to device to be ready */
+		return pci_slot_set_sm_timeout(slot, msecs_to_tb(250));
+
+	case OCAPI_SLOT_FRESET_DEASSERT_DELAY2:
 		if (dev->train_fenced) {
 			OCAPIDBG(dev, "Unfencing OTL after reset\n");
 			npu2_write(dev->npu, NPU2_MISC_FENCE_STATE,
@@ -1410,45 +1436,62 @@ static int64_t npu2_opencapi_ioda_reset(struct phb __unused *phb,
 
 static int64_t npu2_opencapi_set_pe(struct phb *phb,
 				    uint64_t pe_num,
-				    uint64_t bdfn,
-				    uint8_t bcompare,
-				    uint8_t dcompare,
-				    uint8_t fcompare,
-				    uint8_t action)
+				    uint64_t __unused bdfn,
+				    uint8_t __unused bcompare,
+				    uint8_t __unused dcompare,
+				    uint8_t __unused fcompare,
+				    uint8_t __unused action)
 {
-	struct npu2 *p;
-	struct npu2_dev *dev;
-	uint64_t reg, val, pe_bdfn;
+	struct npu2_dev *dev = phb_to_npu2_dev_ocapi(phb);
+	/*
+	 * Ignored on OpenCAPI - we use fixed PE assignments. May need
+	 * addressing when we support dual-link devices.
+	 *
+	 * We nonetheless store the PE reported by the OS so that we
+	 * can send it back in case of error. If there are several PCI
+	 * functions on the device, the OS can define many PEs, we
+	 * only keep one, the OS will handle it.
+	 */
+	dev->linux_pe = pe_num;
+	return OPAL_SUCCESS;
+}
 
-	/* Sanity check */
-	if (action != OPAL_MAP_PE && action != OPAL_UNMAP_PE)
+static int64_t npu2_opencapi_freeze_status(struct phb *phb __unused,
+			   uint64_t pe_number __unused,
+			   uint8_t *freeze_state,
+			   uint16_t *pci_error_type,
+			   uint16_t *severity)
+{
+	*freeze_state = OPAL_EEH_STOPPED_NOT_FROZEN;
+	*pci_error_type = OPAL_EEH_NO_ERROR;
+	if (severity)
+		*severity = OPAL_EEH_SEV_NO_ERROR;
+
+	return OPAL_SUCCESS;
+}
+
+static int64_t npu2_opencapi_eeh_next_error(struct phb *phb,
+				   uint64_t *first_frozen_pe,
+				   uint16_t *pci_error_type,
+				   uint16_t *severity)
+{
+	struct npu2_dev *dev = phb_to_npu2_dev_ocapi(phb);
+	uint64_t reg;
+
+	if (!first_frozen_pe || !pci_error_type || !severity)
 		return OPAL_PARAMETER;
-	if (pe_num >= NPU2_MAX_PE_NUM)
-		return OPAL_PARAMETER;
-	if (bdfn >> 8)
-		return OPAL_PARAMETER;
-	if (bcompare != OpalPciBusAll ||
-	    dcompare != OPAL_COMPARE_RID_DEVICE_NUMBER ||
-	    fcompare != OPAL_COMPARE_RID_FUNCTION_NUMBER)
-		return OPAL_UNSUPPORTED;
 
-	/* Get the NPU2 device */
-	dev = phb_to_npu2_dev_ocapi(phb);
-	if (!dev)
-		return OPAL_PARAMETER;
-
-	p = dev->npu;
-
-	pe_bdfn = dev->bdfn;
-
-	val = NPU2_MISC_BRICK_BDF2PE_MAP_ENABLE;
-	val = SETFIELD(NPU2_MISC_BRICK_BDF2PE_MAP_PE, val, pe_num);
-	val = SETFIELD(NPU2_MISC_BRICK_BDF2PE_MAP_BDF, val, pe_bdfn);
-	reg = NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC,
-			      NPU2_MISC_BRICK0_BDF2PE_MAP0 +
-			      (dev->brick_index * 0x18));
-	npu2_write(p, reg, val);
-
+	reg = npu2_read(dev->npu, NPU2_MISC_FENCE_STATE);
+	if (reg & PPC_BIT(dev->brick_index)) {
+		OCAPIERR(dev, "Brick %d fenced!\n", dev->brick_index);
+		*first_frozen_pe = dev->linux_pe;
+		*pci_error_type = OPAL_EEH_PHB_ERROR;
+		*severity = OPAL_EEH_SEV_PHB_DEAD;
+	} else {
+		*first_frozen_pe = -1;
+		*pci_error_type = OPAL_EEH_NO_ERROR;
+		*severity = OPAL_EEH_SEV_NO_ERROR;
+	}
 	return OPAL_SUCCESS;
 }
 
@@ -1465,7 +1508,7 @@ static int npu2_add_mmio_regs(struct phb *phb, struct pci_device *pd,
 	 * Pass the hw irq number for the translation fault irq
 	 * irq levels 23 -> 26 are for translation faults, 1 per brick
 	 */
-	irq = dev->npu->irq_base + NPU_IRQ_LEVELS_XSL;
+	irq = dev->npu->base_lsi + NPU_IRQ_LEVELS_XSL;
 	if (stacku == NPU2_STACK_STCK_2U)
 		irq += 2;
 	if (block == NPU2_BLOCK_OTL1)
@@ -1512,9 +1555,9 @@ static void mask_nvlink_fir(struct npu2 *p)
 	 */
 
 	/* Mask FIRs */
-	xscom_read(p->chip_id, p->xscom_base + NPU2_MISC_FIR_MASK1, &reg);
+	xscom_read(p->chip_id, p->xscom_base + NPU2_MISC_FIR1_MASK, &reg);
 	reg = SETFIELD(PPC_BITMASK(0, 11), reg, 0xFFF);
-	xscom_write(p->chip_id, p->xscom_base + NPU2_MISC_FIR_MASK1, reg);
+	xscom_write(p->chip_id, p->xscom_base + NPU2_MISC_FIR1_MASK, reg);
 
 	/* freeze disable */
 	reg = npu2_scom_read(p->chip_id, p->xscom_base,
@@ -1538,49 +1581,51 @@ static void mask_nvlink_fir(struct npu2 *p)
 			NPU2_MISC_IRQ_ENABLE1, NPU2_MISC_DA_LEN_8B, reg);
 }
 
-static int setup_irq(struct npu2 *p)
+static int enable_interrupts(struct npu2 *p)
 {
-	uint64_t reg, mmio_addr;
-	uint32_t base;
+	uint64_t reg, xsl_fault, xstop_override, xsl_mask;
 
-	base = xive_alloc_ipi_irqs(p->chip_id, NPU_IRQ_LEVELS, 64);
-	if (base == XIVE_IRQ_ERROR) {
-		/**
-		 * @fwts-label OCAPIIRQAllocationFailed
-		 * @fwts-advice OpenCAPI IRQ setup failed. This is probably
-		 * a firmware bug. OpenCAPI functionality will be broken.
-		 */
-		prlog(PR_ERR, "OCAPI: Couldn't allocate interrupts for NPU\n");
-		return -1;
-	}
-	p->irq_base = base;
-
-	xive_register_ipi_source(base, NPU_IRQ_LEVELS, NULL, NULL);
-	mmio_addr = (uint64_t ) xive_get_trigger_port(base);
-	prlog(PR_DEBUG, "OCAPI: NPU base irq %d @%llx\n", base, mmio_addr);
-	reg = (mmio_addr & NPU2_MISC_IRQ_BASE_MASK) << 13;
-	npu2_scom_write(p->chip_id, p->xscom_base, NPU2_MISC_IRQ_BASE,
-			NPU2_MISC_DA_LEN_8B, reg);
 	/*
-	 * setup page size = 64k
+	 * We need to:
+	 * - enable translation interrupts for all bricks
+	 * - override most brick-fatal errors from FIR2 to send an
+	 *   interrupt instead of the default action of checkstopping
+	 *   the systems, since we can just fence the brick and keep
+	 *   the system alive.
+	 * - the exception to the above is 2 FIRs for XSL errors
+	 *   resulting of bad AFU behavior, for which we don't want to
+	 *   checkstop but can't configure to send an error interrupt
+	 *   either, as the XSL errors are reported on 2 links (the
+	 *   XSL is shared between 2 links). Instead, we mask
+	 *   them. The XSL errors will result in an OTL error, which
+	 *   is reported only once, for the correct link.
 	 *
-	 * OS type is set to AIX: opal also runs with 2 pages per interrupt,
-	 * so to cover the max offset for 35 levels of interrupt, we need
-	 * bits 41 to 46, which is what the AIX setting does. There's no
-	 * other meaning for that AIX setting.
+	 * FIR bits configured to trigger an interrupt must have their
+	 * default action masked
 	 */
-	reg = npu2_scom_read(p->chip_id, p->xscom_base, NPU2_MISC_CFG,
-			NPU2_MISC_DA_LEN_8B);
-	reg |= NPU2_MISC_CFG_IPI_PS;
-	reg &= ~NPU2_MISC_CFG_IPI_OS;
-	npu2_scom_write(p->chip_id, p->xscom_base, NPU2_MISC_CFG,
-			NPU2_MISC_DA_LEN_8B, reg);
+	xsl_fault = PPC_BIT(0) | PPC_BIT(1) | PPC_BIT(2) | PPC_BIT(3);
+	xstop_override = 0x0FFFEFC00F91B000;
+	xsl_mask = PPC_BIT(41) | PPC_BIT(42);
 
-	/* enable translation interrupts for all bricks */
+	xscom_read(p->chip_id, p->xscom_base + NPU2_MISC_FIR2_MASK, &reg);
+	reg |= xsl_fault | xstop_override | xsl_mask;
+	xscom_write(p->chip_id, p->xscom_base + NPU2_MISC_FIR2_MASK, reg);
+
 	reg = npu2_scom_read(p->chip_id, p->xscom_base, NPU2_MISC_IRQ_ENABLE2,
 			     NPU2_MISC_DA_LEN_8B);
-	reg |= PPC_BIT(0) | PPC_BIT(1) | PPC_BIT(2) | PPC_BIT(3);
+	reg |= xsl_fault | xstop_override;
 	npu2_scom_write(p->chip_id, p->xscom_base, NPU2_MISC_IRQ_ENABLE2,
+			NPU2_MISC_DA_LEN_8B, reg);
+
+	/*
+	 * Make sure the brick is fenced on those errors.
+	 * Fencing is incompatible with freezing, but there's no
+	 * freeze defined for FIR2, so we don't have to worry about it
+	 */
+	reg = npu2_scom_read(p->chip_id, p->xscom_base, NPU2_MISC_FENCE_ENABLE2,
+			     NPU2_MISC_DA_LEN_8B);
+	reg |= xstop_override;
+	npu2_scom_write(p->chip_id, p->xscom_base, NPU2_MISC_FENCE_ENABLE2,
 			NPU2_MISC_DA_LEN_8B, reg);
 
 	mask_nvlink_fir(p);
@@ -1589,7 +1634,7 @@ static int setup_irq(struct npu2 *p)
 
 static void setup_debug_training_state(struct npu2_dev *dev)
 {
-	npu2_opencapi_phy_setup(dev);
+	npu2_opencapi_phy_reset(dev);
 
 	switch (npu2_ocapi_training_state) {
 	case NPU2_TRAIN_PRBS31:
@@ -1639,7 +1684,13 @@ static void setup_device(struct npu2_dev *dev)
 	dt_add_property_cells(dn_phb, "ibm,links", 1);
 	dt_add_property(dn_phb, "ibm,mmio-window", mm_win, sizeof(mm_win));
 	dt_add_property_cells(dn_phb, "ibm,phb-diag-data-size", 0);
+
+	/*
+	 * We ignore whatever PE numbers Linux tries to set, so we just
+	 * advertise enough that Linux won't complain
+	 */
 	dt_add_property_cells(dn_phb, "ibm,opal-num-pes", NPU2_MAX_PE_NUM);
+	dt_add_property_cells(dn_phb, "ibm,opal-reserved-pe", NPU2_RESERVED_PE_NUM);
 
 	dt_add_property_cells(dn_phb, "ranges", 0x02000000,
 			      hi32(mm_win[0]), lo32(mm_win[0]),
@@ -1652,6 +1703,7 @@ static void setup_device(struct npu2_dev *dev)
 	dev->phb_ocapi.scan_map = 0;
 
 	dev->bdfn = 0;
+	dev->linux_pe = -1;
 	dev->train_need_fence = false;
 	dev->train_fenced = false;
 
@@ -1660,6 +1712,8 @@ static void setup_device(struct npu2_dev *dev)
 	setup_afu_mmio_bars(dev->npu->chip_id, dev->npu->xscom_base, dev);
 	/* Procedure 13.1.3.9 - AFU Config BARs */
 	setup_afu_config_bars(dev->npu->chip_id, dev->npu->xscom_base, dev);
+	setup_perf_counters(dev);
+	npu2_opencapi_phy_init(dev);
 
 	set_fence_control(dev->npu->chip_id, dev->npu->xscom_base, dev->brick_index, 0b00);
 
@@ -1684,7 +1738,7 @@ static void read_nvram_training_state(void)
 {
 	const char *state;
 
-	state = nvram_query("opencapi-link-training");
+	state = nvram_query_dangerous("opencapi-link-training");
 	if (state) {
 		if (!strcmp(state, "prbs31"))
 			npu2_ocapi_training_state = NPU2_TRAIN_PRBS31;
@@ -1701,7 +1755,6 @@ int npu2_opencapi_init_npu(struct npu2 *npu)
 {
 	struct npu2_dev *dev;
 	uint64_t reg[2];
-	int rc;
 
 	assert(platform.ocapi);
 	read_nvram_training_state();
@@ -1724,6 +1777,9 @@ int npu2_opencapi_init_npu(struct npu2 *npu)
 		/* Procedure 13.1.3.1 - Select OCAPI vs NVLink */
 		brick_config(npu->chip_id, npu->xscom_base, dev->brick_index);
 
+		/* Procedure 13.1.3.4 - Brick to PE Mapping */
+		pe_config(dev);
+
 		/* Procedure 13.1.3.5 - Transaction Layer Configuration */
 		tl_config(npu->chip_id, npu->xscom_base, dev->brick_index);
 
@@ -1731,10 +1787,7 @@ int npu2_opencapi_init_npu(struct npu2 *npu)
 		address_translation_config(npu->chip_id, npu->xscom_base, dev->brick_index);
 	}
 
-	/* Procedure 13.1.3.10 - Interrupt Configuration */
-	rc = setup_irq(npu);
-	if (rc)
-		goto failed;
+	enable_interrupts(npu);
 
 	for (int i = 0; i < npu->total_devices; i++) {
 		dev = &npu->devices[i];
@@ -1744,8 +1797,6 @@ int npu2_opencapi_init_npu(struct npu2 *npu)
 	}
 
 	return 0;
-failed:
-	return -1;
 }
 
 static const struct phb_ops npu2_opencapi_ops = {
@@ -1772,12 +1823,11 @@ static const struct phb_ops npu2_opencapi_ops = {
 	.get_msi_64		= NULL,
 	.set_pe			= npu2_opencapi_set_pe,
 	.set_peltv		= NULL,
-	.eeh_freeze_status	= npu2_freeze_status,  /* TODO */
+	.eeh_freeze_status	= npu2_opencapi_freeze_status,
 	.eeh_freeze_clear	= NULL,
 	.eeh_freeze_set		= NULL,
-	.next_error		= NULL,
+	.next_error		= npu2_opencapi_eeh_next_error,
 	.err_inject		= NULL,
-	.get_diag_data		= NULL,
 	.get_diag_data2		= NULL,
 	.set_capi_mode		= NULL,
 	.set_capp_recovery	= NULL,
@@ -1985,3 +2035,184 @@ static int64_t opal_npu_tl_set(uint64_t phb_id, uint32_t __unused bdfn,
 	return OPAL_SUCCESS;
 }
 opal_call(OPAL_NPU_TL_SET, opal_npu_tl_set, 5);
+
+static void set_mem_bar(struct npu2_dev *dev, uint64_t base, uint64_t size)
+{
+	uint64_t stack, val, reg, bar_offset, pa_config_offset;
+	uint8_t memsel;
+
+	stack = index_to_stack(dev->brick_index);
+	switch (dev->brick_index) {
+	case 2:
+	case 4:
+		bar_offset = NPU2_GPU0_MEM_BAR;
+		pa_config_offset = NPU2_CQ_CTL_MISC_PA0_CONFIG;
+		break;
+	case 3:
+	case 5:
+		bar_offset = NPU2_GPU1_MEM_BAR;
+		pa_config_offset = NPU2_CQ_CTL_MISC_PA1_CONFIG;
+		break;
+	default:
+		assert(false);
+	}
+
+	assert((!size && !base) || (size && base));
+
+	/*
+	 * Memory select configuration:
+	 * - 0b000 - BAR disabled
+	 * - 0b001 - match 0b00, 0b01
+	 * - 0b010 - match 0b01, 0b10
+	 * - 0b011 - match 0b00, 0b10
+	 * - 0b100 - match 0b00
+	 * - 0b101 - match 0b01
+	 * - 0b110 - match 0b10
+	 * - 0b111 - match 0b00, 0b01, 0b10
+	 */
+	memsel = GETFIELD(PPC_BITMASK(13, 14), base);
+	if (size)
+		val = SETFIELD(NPU2_MEM_BAR_EN | NPU2_MEM_BAR_SEL_MEM, 0ULL, 0b100 + memsel);
+	else
+		val = 0;
+
+	/* Base address - 12 bits, 1G aligned */
+	val = SETFIELD(NPU2_MEM_BAR_NODE_ADDR, val, GETFIELD(PPC_BITMASK(22, 33), base));
+
+	/* GCID */
+	val = SETFIELD(NPU2_MEM_BAR_GROUP, val, GETFIELD(PPC_BITMASK(15, 18), base));
+	val = SETFIELD(NPU2_MEM_BAR_CHIP, val, GETFIELD(PPC_BITMASK(19, 21), base));
+
+	/* Other settings */
+	val = SETFIELD(NPU2_MEM_BAR_POISON, val, 1);
+	val = SETFIELD(NPU2_MEM_BAR_GRANULE, val, 0);
+	val = SETFIELD(NPU2_MEM_BAR_BAR_SIZE, val, ilog2(size >> 30));
+	val = SETFIELD(NPU2_MEM_BAR_MODE, val, 0);
+
+	for (int block = NPU2_BLOCK_SM_0; block <= NPU2_BLOCK_SM_3; block++) {
+		reg = NPU2_REG_OFFSET(stack, block, bar_offset);
+		npu2_write(dev->npu, reg, val);
+	}
+
+	/* Set PA config */
+	if (size)
+		val = SETFIELD(NPU2_CQ_CTL_MISC_PA_CONFIG_MEMSELMATCH, 0ULL, 0b100 + memsel);
+	else
+		val = 0;
+	val = SETFIELD(NPU2_CQ_CTL_MISC_PA_CONFIG_GRANULE, val, 0);
+	val = SETFIELD(NPU2_CQ_CTL_MISC_PA_CONFIG_SIZE, val, ilog2(size >> 30));
+	val = SETFIELD(NPU2_CQ_CTL_MISC_PA_CONFIG_MODE, val, 0);
+	val = SETFIELD(NPU2_CQ_CTL_MISC_PA_CONFIG_MASK, val, 0);
+	reg = NPU2_REG_OFFSET(stack, NPU2_BLOCK_CTL, pa_config_offset);
+	npu2_write(dev->npu, reg, val);
+}
+
+static int64_t alloc_mem_bar(struct npu2_dev *dev, uint64_t size, uint64_t *bar)
+{
+	uint64_t phys_map_base, phys_map_size;
+	int rc = OPAL_SUCCESS;
+
+	lock(&dev->npu->lock);
+
+	/*
+	 * Right now, we support 1 allocation per chip, of up to 4TB.
+	 *
+	 * In future, we will use chip address extension to support
+	 * >4TB ranges, and we will implement a more sophisticated
+	 * allocator to allow an allocation for every link on a chip.
+	 */
+
+	if (dev->npu->lpc_mem_allocated) {
+		rc = OPAL_RESOURCE;
+		goto out;
+	}
+
+	phys_map_get(dev->npu->chip_id, OCAPI_MEM, 0, &phys_map_base, &phys_map_size);
+
+	if (size > phys_map_size) {
+		/**
+		 * @fwts-label OCAPIInvalidLPCMemoryBARSize
+		 * @fwts-advice The operating system requested an unsupported
+		 * amount of OpenCAPI LPC memory. This is possibly a kernel
+		 * bug, or you may need to upgrade your firmware.
+		 */
+		OCAPIERR(dev, "Invalid LPC memory BAR allocation size requested: 0x%llx bytes (limit 0x%llx)\n",
+			 size, phys_map_size);
+		rc = OPAL_PARAMETER;
+		goto out;
+	}
+
+	/* Minimum BAR size is 1 GB */
+	if (size < (1 << 30)) {
+		size = 1 << 30;
+	}
+
+	if (!is_pow2(size)) {
+		size = 1 << (ilog2(size) + 1);
+	}
+
+	set_mem_bar(dev, phys_map_base, size);
+	*bar = phys_map_base;
+	dev->npu->lpc_mem_allocated = dev;
+
+out:
+	unlock(&dev->npu->lock);
+	return rc;
+}
+
+static int64_t release_mem_bar(struct npu2_dev *dev)
+{
+	int rc = OPAL_SUCCESS;
+
+	lock(&dev->npu->lock);
+
+	if (dev->npu->lpc_mem_allocated != dev) {
+		rc = OPAL_PARAMETER;
+		goto out;
+	}
+
+	set_mem_bar(dev, 0, 0);
+	dev->npu->lpc_mem_allocated = NULL;
+
+out:
+	unlock(&dev->npu->lock);
+	return rc;
+}
+
+static int64_t opal_npu_mem_alloc(uint64_t phb_id, uint32_t __unused bdfn,
+				  uint64_t size, uint64_t *bar)
+{
+	struct phb *phb = pci_get_phb(phb_id);
+	struct npu2_dev *dev;
+
+
+	if (!phb || phb->phb_type != phb_type_npu_v2_opencapi)
+		return OPAL_PARAMETER;
+
+	dev = phb_to_npu2_dev_ocapi(phb);
+	if (!dev)
+		return OPAL_PARAMETER;
+
+	if (!opal_addr_valid(bar))
+		return OPAL_PARAMETER;
+
+	return alloc_mem_bar(dev, size, bar);
+}
+opal_call(OPAL_NPU_MEM_ALLOC, opal_npu_mem_alloc, 4);
+
+static int64_t opal_npu_mem_release(uint64_t phb_id, uint32_t __unused bdfn)
+{
+	struct phb *phb = pci_get_phb(phb_id);
+	struct npu2_dev *dev;
+
+
+	if (!phb || phb->phb_type != phb_type_npu_v2_opencapi)
+		return OPAL_PARAMETER;
+
+	dev = phb_to_npu2_dev_ocapi(phb);
+	if (!dev)
+		return OPAL_PARAMETER;
+
+	return release_mem_bar(dev);
+}
+opal_call(OPAL_NPU_MEM_RELEASE, opal_npu_mem_release, 2);

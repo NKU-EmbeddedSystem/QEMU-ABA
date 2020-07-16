@@ -51,7 +51,7 @@ void plic_fdt_fixup(void *fdt, const char *compat)
 {
 	u32 *cells;
 	int i, cells_count;
-	u32 plic_off;
+	int plic_off;
 
 	plic_off = fdt_node_offset_by_compatible(fdt, 0, compat);
 	if (plic_off < 0)
@@ -68,7 +68,7 @@ void plic_fdt_fixup(void *fdt, const char *compat)
 
 	for (i = 0; i < (cells_count / 2); i++) {
 		if (fdt32_to_cpu(cells[2 * i + 1]) == IRQ_M_EXT)
-			cells[2 * i + 1] = fdt32_to_cpu(0xffffffff);
+			cells[2 * i + 1] = cpu_to_fdt32(0xffffffff);
 	}
 }
 

@@ -1,6 +1,7 @@
 P9 XIVE Exploitation
 ====================
 
+.. _xive-device-tree:
 
 I - Device-tree updates
 -----------------------
@@ -270,6 +271,8 @@ IV - OPAL APIs
              These aren't fully specified (yet) but common sense shall
              apply.
 
+.. _OPAL_XIVE_RESET:
+
 OPAL_XIVE_RESET
 ^^^^^^^^^^^^^^^
 .. code-block:: c
@@ -307,6 +310,8 @@ first.
 	  enabled or disabled. It *will* spend a significant amount of time
 	  inside OPAL and as such is not suitable to be performed during normal
 	  runtime.
+
+.. _OPAL_XIVE_GET_IRQ_INFO:
 
 OPAL_XIVE_GET_IRQ_INFO
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -384,6 +389,8 @@ OPAL_BUSY.
       the OS to use that to pick up a default target processor on
       the same chip.
 
+.. _OPAL_XIVE_EOI:
+
 OPAL_XIVE_EOI
 ^^^^^^^^^^^^^
 
@@ -401,6 +408,8 @@ is preferred.
 	  The call will perform the appropriate function depending on
 	  whether OPAL is in XICS emulation mode  or native XIVE exploitation
 	  mode.
+
+.. _OPAL_XIVE_GET_IRQ_CONFIG:
 
 OPAL_XIVE_GET_IRQ_CONFIG
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -425,6 +434,8 @@ interrupt number (the number that will be presented in the queue).
 
 * out_lirq: Will contain the logical interrupt assigned to the
   interrupt. By default this will be the same as girq.
+
+.. _OPAL_XIVE_SET_IRQ_CONFIG:
 
 OPAL_XIVE_SET_IRQ_CONFIG
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -477,6 +488,8 @@ in the target queue).
   no handler registered for a given interrupt anymore or when registering
   a new handler for an interrupt that had none. In these case, losing
   interrupts happening while no handler was attached is considered fine.
+
+.. _OPAL_XIVE_GET_QUEUE_INFO:
 
 OPAL_XIVE_GET_QUEUE_INFO
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -542,6 +555,8 @@ with a virtual processor and a priority.
     When this is set, the EQ will escalate to the escalation interrupt
     when failing to notify.
 
+.. _OPAL_XIVE_SET_QUEUE_INFO:
+
 OPAL_XIVE_SET_QUEUE_INFO
 ^^^^^^^^^^^^^^^^^^^^^^^^
 .. code-block:: c
@@ -577,6 +592,8 @@ and priority and adjust the behaviour of the queue via flags.
 	    all other flags and arguments are ignored and the queue
 	    configuration is wiped.
 
+.. _OPAL_XIVE_DONATE_PAGE:
+
 OPAL_XIVE_DONATE_PAGE
 ^^^^^^^^^^^^^^^^^^^^^
 .. code-block:: c
@@ -599,6 +616,8 @@ for each chip in the system and hand it to OPAL before trying again.
 .. note:: It is possible that the provisioning ends up requiring more than
 	  one page per chip. OPAL will keep returning the above error until
 	  enough pages have been provided.
+
+.. _OPAL_XIVE_ALLOCATE_VP_BLOCK:
 
 OPAL_XIVE_ALLOCATE_VP_BLOCK
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -624,6 +643,8 @@ below with the OPAL_XIVE_VP_ENABLED flag set before use.
 For all priorities, the corresponding queues must also be individually
 provisioned and enabled with opal_xive_set_queue_info.
 
+.. _OPAL_XIVE_FREE_VP_BLOCK:
+
 OPAL_XIVE_FREE_VP_BLOCK
 ^^^^^^^^^^^^^^^^^^^^^^^
 .. code-block:: c
@@ -640,6 +661,8 @@ below with the OPAL_XIVE_VP_ENABLED flag cleared before use.
 All the queues must also have been disabled.
 
 Failure to do any of the above will result in an OPAL_XIVE_FREE_ACTIVE error.
+
+.. _OPAL_XIVE_GET_VP_INFO:
 
 OPAL_XIVE_GET_VP_INFO
 ^^^^^^^^^^^^^^^^^^^^^
@@ -671,6 +694,8 @@ This call returns information about a VP:
   pair for that VP (defaults to 0, ie disabled)
 
 * chip_id: The chip that VCPU was allocated on
+
+.. _OPAL_XIVE_SET_VP_INFO:
 
 OPAL_XIVE_SET_VP_INFO
 ^^^^^^^^^^^^^^^^^^^^^
@@ -714,6 +739,7 @@ This call configures a VP:
 
     .. note:: When disabling a VP, all other VP settings are lost.
 
+.. _OPAL_XIVE_ALLOCATE_IRQ:
 
 OPAL_XIVE_ALLOCATE_IRQ
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -724,6 +750,8 @@ OPAL_XIVE_ALLOCATE_IRQ
 This call allocates a software IRQ on a given chip. It returns the
 interrupt number or a negative error code.
 
+.. _OPAL_XIVE_FREE_IRQ:
+
 OPAL_XIVE_FREE_IRQ
 ^^^^^^^^^^^^^^^^^^
 .. code-block:: c
@@ -733,6 +761,8 @@ OPAL_XIVE_FREE_IRQ
 This call frees a software IRQ that was allocated by
 opal_xive_allocate_irq. Passing any other interrupt number
 will result in an OPAL_PARAMETER error.
+
+.. _OPAL_XIVE_SYNC:
 
 OPAL_XIVE_SYNC
 ^^^^^^^^^^^^^^
@@ -760,6 +790,7 @@ processor.
 
 * id: Depends on the synchronization type, see above
 
+.. _OPAL_XIVE_DUMP:
 
 OPAL_XIVE_DUMP
 ^^^^^^^^^^^^^^
@@ -790,3 +821,58 @@ state information about the XIVE.
   - XIVE_DUMP_EMU:     Dump the state of the XICS emulation for a thread
 		       "id" is the PIR value of the thread
 
+.. _OPAL_XIVE_GET_QUEUE_STATE:
+
+OPAL_XIVE_GET_QUEUE_STATE
+^^^^^^^^^^^^^^^^^^^^^^^^^
+.. code-block:: c
+
+ int64_t opal_xive_get_queue_state(uint64_t vp, uint32_t prio,
+				   uint32_t *out_qtoggle,
+				   uint32_t *out_qindex);
+
+This call saves the queue toggle bit and index. This must be called on
+an enabled queue.
+
+* vp, prio: The target queue
+
+* out_qtoggle: toggle bit of the queue
+
+* out_qindex: index of the queue
+
+.. _OPAL_XIVE_SET_QUEUE_STATE:
+
+OPAL_XIVE_SET_QUEUE_STATE
+^^^^^^^^^^^^^^^^^^^^^^^^^
+.. code-block:: c
+
+ int64_t opal_xive_set_queue_state(uint64_t vp, uint32_t prio,
+				   uint32_t qtoggle,
+				   uint32_t qindex);
+
+This call restores the queue toggle bit and index that was previously
+saved by a call to opal_xive_get_queue_state(). This must be called on
+an enabled queue.
+
+* vp, prio: The target queue
+
+* qtoggle: toggle bit of the queue
+
+* qindex: index of the queue
+
+
+.. _OPAL_XIVE_GET_VP_STATE:
+
+OPAL_XIVE_GET_VP_STATE
+^^^^^^^^^^^^^^^^^^^^^^
+.. code-block:: c
+
+ int64_t opal_xive_get_vp_state(uint64_t vp_id,
+				uint64_t *out_state);
+
+This call saves the VP HW state in "out_state". The format matches the
+XIVE NVT word 4 and word 5. This must be called on an enabled VP.
+
+* vp_id: The target VP
+
+* out_state: Location where the state is to be stored

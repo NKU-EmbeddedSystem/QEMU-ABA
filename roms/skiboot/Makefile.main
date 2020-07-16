@@ -30,7 +30,6 @@ CWARNS := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 	  -Wmissing-prototypes -Wmissing-declarations \
 	  -Wwrite-strings -Wcast-align \
 	  -Winit-self \
-	  -Wframe-larger-than=1024 \
 	  $(call try-cflag,$(CC),--Wno-stringop-truncation) \
 	  -Werror
 
@@ -44,6 +43,12 @@ HOSTCFLAGS += $(call try-cflag,$(HOSTCC),-Wjump-misses-init) \
 	  $(call try-cflag,$(HOSTCC),-Wsuggest-attribute=const) \
 	  $(call try-cflag,$(HOSTCC),-Wsuggest-attribute=noreturn)
 HOSTCFLAGS += -DDEBUG -DCCAN_LIST_DEBUG
+
+# We want small stack usage for skiboot
+# but host compilation of unit tests tend to inline heavily,
+# which creates larger stack frames and triggering useless warnings
+HOSTCFLAGS += -Wframe-larger-than=4096
+CWARNS += -Wframe-larger-than=1024
 
 HOSTGCOVCFLAGS = -fprofile-arcs -ftest-coverage -lgcov -O0 -g -pg
 
@@ -69,9 +74,9 @@ ifeq ($(DEBUG),1)
 CPPFLAGS += -DDEBUG -DCCAN_LIST_DEBUG
 endif
 
-CFLAGS := -fno-strict-aliasing -pie -fpie -fno-pic -mbig-endian -m64
+CFLAGS := -fno-strict-aliasing -pie -fpie -fno-pic -mbig-endian -m64 -fno-asynchronous-unwind-tables
 CFLAGS += -mcpu=power7
-CFLAGS += -Wl,--oformat,elf64-powerpc
+CFLAGS += -Wl,--oformat,elf64-powerpc -ggdb
 CFLAGS += $(call try-cflag,$(CC),-ffixed-r13)
 CFLAGS += $(call try-cflag,$(CC),-std=gnu11)
 ifeq ($(ELF_ABI_v2),1)
@@ -120,7 +125,8 @@ endif
 CFLAGS += $(call try-cflag,$(CC),-Wjump-misses-init) \
 	  $(call try-cflag,$(CC),-Wsuggest-attribute=const) \
 	  $(call try-cflag,$(CC),-Wsuggest-attribute=noreturn) \
-	  $(call try-cflag,$(CC),-Wstack-usage=1024)
+	  $(call try-cflag,$(CC),-Wstack-usage=1024) \
+	  $(call try-cflag,$(CC),-Wno-error=address-of-packed-member)
 
 CFLAGS += $(CWARNS) $(OPTS) $(DBG)
 
@@ -131,6 +137,8 @@ LDFLAGS += -Wl,--no-multi-toc
 LDFLAGS += -mcpu=power7 -mbig-endian -Wl,--oformat,elf64-powerpc
 LDFLAGS_FINAL = -EB -m elf64ppc --no-multi-toc -N --build-id=none --whole-archive
 LDFLAGS_FINAL += -static -nostdlib -pie -Ttext-segment=$(LD_TEXT) --oformat=elf64-powerpc
+LDFLAGS_FINAL += --orphan-handling=warn
+
 LDRFLAGS=-melf64ppc
 # Debug stuff
 #LDFLAGS += -Wl,-v -Wl,-Map,foomap 
@@ -340,6 +348,8 @@ cscope:
 
 clean:
 	$(RM) *.[odsa] $(SUBDIRS:%=%/*.[odsa])
+	$(RM) *.gcno $(SUBDIRS:%=%/*.gcno)
+	$(RM) *.gcda $(SUBDIRS:%=%/*.gcda)
 	$(RM) *.elf $(TARGET).lid *.map $(TARGET).lds $(TARGET).lid.xz
 	$(RM) include/asm-offsets.h version.c .version
 	$(RM) skiboot.info external/gard/gard.info external/pflash/pflash.info

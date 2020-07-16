@@ -215,34 +215,30 @@ static int64_t pcie_slot_set_power_state_ext(struct pci_slot *slot, uint8_t val,
 		return OPAL_SUCCESS;
 	}
 
-	/* The power supply to the slot should be always on when surprise
-	 * hotplug is claimed. For this case, update with the requested
-	 * power state and bail immediately.
+	/*
+	 * Suprise hotpluggable slots need to be handled with care since
+	 * many systems do not implement the presence detect side-band
+	 * signal. Instead, they rely on in-band presence to report the
+	 * existence of a hotplugged card.
 	 *
-	 * The PCIe link is likely down if we're powering on the slot upon
-	 * the detected presence. Nothing behind the slot will be probed if
-	 * we do it immediately even we do have PCI devices connected to the
-	 * slot. For this case, we force upper layer to wait for the PCIe
-	 * link to be up before probing the PCI devices behind the slot. It's
-	 * only concerned in surprise hotplug path. In managed hot-add path,
-	 * the PCIe link should have been ready before we power on the slot.
-	 * However, it's not harmful to do so in managed hot-add path.
+	 * This is problematic because:
+	 * a) When PERST is asserted in-band presence doesn't work, and
+	 * b) Switches assert PERST as a part of the "slot power down" sequence
 	 *
-	 * When flag PCI_SLOT_FLAG_FORCE_POWERON is set for the PCI slot, we
-	 * should turn on the slot's power supply on hardware on user's request
-	 * because that might have been lost. Otherwise, the PCIe link behind
-	 * the slot won't become ready for ever and PCI adapter behind the slot
-	 * can't be probed successfully.
+	 * To work around the problem we leave the slot physically powered on
+	 * and exit early here. This way when a new card is inserted, the switch
+	 * will raise an interrupt due to the PresDet status changing.
 	 */
 	if (surprise_check && slot->surprise_pluggable) {
 		slot->power_state = val;
 		if (val == PCI_SLOT_POWER_OFF)
 			return OPAL_SUCCESS;
 
-		if (!pci_slot_has_flags(slot, PCI_SLOT_FLAG_FORCE_POWERON)) {
-			pci_slot_set_state(slot, PCI_SLOT_STATE_SPOWER_DONE);
-			return OPAL_ASYNC_COMPLETION;
-		}
+		/*
+		 * Some systems have the slot power disabled by default
+		 * so we always perform the power-on step. This is not
+		 * *strictly* required, but it's probably a good idea.
+		 */
 	}
 
 	pci_slot_set_state(slot, PCI_SLOT_STATE_SPOWER_START);
@@ -473,14 +469,14 @@ struct pci_slot *pcie_slot_create(struct phb *phb, struct pci_device *pd)
 	if (slot->slot_cap & PCICAP_EXP_SLOTCAP_HPLUG_CAP)
 		slot->pluggable = 1;
 
+	/* Assume the slot is powered on by default */
+	slot->power_state = PCI_SLOT_POWER_ON;
 	if (slot->slot_cap & PCICAP_EXP_SLOTCAP_PWCTRL) {
 		slot->power_ctl = 1;
 
-		/* The power is on by default */
-		slot->power_state = PCI_SLOT_POWER_ON;
 		pci_cfg_read16(phb, pd->bdfn, ecap + PCICAP_EXP_SLOTCTL,
 			       &slot_ctl);
-		if (((slot_ctl & PCICAP_EXP_SLOTCTL_PWRI) >> 8) == PCIE_INDIC_OFF)
+		if (slot_ctl & PCICAP_EXP_SLOTCTL_PWRCTLR)
 			slot->power_state = PCI_SLOT_POWER_OFF;
 	}
 

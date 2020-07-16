@@ -1,4 +1,4 @@
-/* Copyright 2013-2014 IBM Corp.
+/* Copyright 2013-2019 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,7 +132,12 @@ void fast_reboot(void)
 		return;
 	}
 
-	if (fast_reboot_disabled) {
+	if (fast_reboot_disabled &&
+	    nvram_query_eq_dangerous("fast-reset", "im-feeling-lucky")) {
+		/* Do fast reboot even if it's been disabled */
+		prlog(PR_NOTICE, "RESET: Ignoring fast reboot disabled: %s\n",
+				fast_reboot_disabled);
+	} else if (fast_reboot_disabled) {
 		prlog(PR_NOTICE, "RESET: Fast reboot disabled: %s\n",
 		      fast_reboot_disabled);
 		opal_quiesce(QUIESCE_RESUME, -1);
@@ -428,8 +433,8 @@ void __noreturn fast_reboot_entry(void)
 	/* Start clearing memory */
 	start_mem_region_clear_unused();
 
-	/* Poke the consoles (see comments in the code there) */
-	fsp_console_reset();
+	if (platform.fast_reboot_init)
+		platform.fast_reboot_init();
 
 	if (proc_gen == proc_gen_p8) {
 		/* XXX */

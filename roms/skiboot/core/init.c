@@ -15,8 +15,6 @@
  */
 
 #include <skiboot.h>
-#include <fsp.h>
-#include <fsp-sysparam.h>
 #include <psi.h>
 #include <chiptod.h>
 #include <nx.h>
@@ -51,12 +49,14 @@
 #include <phys-map.h>
 #include <imc.h>
 #include <dts.h>
+#include <dio-p9.h>
 #include <sbe-p9.h>
 #include <debug_descriptor.h>
 #include <occ.h>
 
 enum proc_gen proc_gen;
 unsigned int pcie_max_link_speed;
+bool verbose_eeh;
 
 static uint64_t kernel_entry;
 static size_t kernel_size;
@@ -385,8 +385,17 @@ static bool load_kernel(void)
 		 */
 		if (kernel_entry < EXCEPTION_VECTORS_END) {
 			cpu_set_sreset_enable(false);
-			memcpy(NULL, old_vectors, EXCEPTION_VECTORS_END);
+			memcpy_null(NULL, old_vectors, EXCEPTION_VECTORS_END);
 			sync_icache();
+		} else {
+			/* Hack for STB in Mambo, assume at least 4kb in mem */
+			if (!kernel_size)
+				kernel_size = SECURE_BOOT_HEADERS_SIZE;
+			if (stb_is_container((void*)kernel_entry, kernel_size)) {
+				stb_container = (void*)kernel_entry;
+				kh = (struct elf_hdr *) (kernel_entry + SECURE_BOOT_HEADERS_SIZE);
+			} else
+				kh = (struct elf_hdr *) (kernel_entry);
 		}
 	} else {
 		if (!kernel_size) {
@@ -526,9 +535,6 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 
 	op_display(OP_LOG, OP_MOD_INIT, 0x000A);
 
-	if (platform.exit)
-		platform.exit();
-
 	/* Load kernel LID */
 	if (!load_kernel()) {
 		op_display(OP_FATAL, OP_MOD_INIT, 1);
@@ -541,8 +547,6 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 
 	ipmi_set_fw_progress_sensor(IPMI_FW_OS_BOOT);
 
-	if (fsp_present())
-		occ_pstates_init();
 
 	if (!is_reboot) {
 		/* We wait for the nvram read to complete here so we can
@@ -550,13 +554,6 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 		 */
 		nvram_wait_for_load();
 
-		/* Wait for FW VPD data read to complete */
-		fsp_code_update_wait_vpd(true);
-
-		/*
-		 * OCC takes few secs to boot.  Call this as late as
-		 * as possible to avoid delay.
-		 */
 		if (!occ_sensors_init())
 			dts_sensor_create_nodes(sensor_node);
 
@@ -566,12 +563,11 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 		fdt = NULL;
 
 		nvram_reinit();
+		occ_pstates_init();
 	}
 
-	fsp_console_select_stdout();
-
 	/* Use nvram bootargs over device tree */
-	cmdline = nvram_query("bootargs");
+	cmdline = nvram_query_safe("bootargs");
 	if (cmdline) {
 		dt_check_del_prop(dt_chosen, "bootargs");
 		dt_add_property_string(dt_chosen, "bootargs", cmdline);
@@ -583,6 +579,9 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 
 	add_fast_reboot_dt_entries();
 
+	if (platform.finalise_dt)
+		platform.finalise_dt(is_reboot);
+
 	/* Create the device tree blob to boot OS. */
 	fdt = create_dtb(dt_root, false);
 	if (!fdt) {
@@ -591,13 +590,6 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 	}
 
 	op_display(OP_LOG, OP_MOD_INIT, 0x000C);
-
-	/* Start the kernel */
-	if (!is_reboot)
-		op_panel_disable_src_echo();
-
-	/* Clear SRCs on the op-panel when Linux starts */
-	op_panel_clear_src();
 
 	mem_dump_free();
 
@@ -612,6 +604,9 @@ void __noreturn load_and_boot_kernel(bool is_reboot)
 		prlog(PR_EMERG, "FATAL: Kernel is zeros, can't execute!\n");
 		assert(0);
 	}
+
+	if (platform.exit)
+		platform.exit();
 
 	/* Take processors out of nap */
 	cpu_set_sreset_enable(false);
@@ -729,7 +724,7 @@ static void console_log_level(void)
 
 	/* console log level:
 	 *   high 4 bits in memory, low 4 bits driver (e.g. uart). */
-	s = nvram_query("log-level-driver");
+	s = nvram_query_safe("log-level-driver");
 	if (s) {
 		level = console_get_level(s);
 		debug_descriptor.console_log_levels =
@@ -738,7 +733,7 @@ static void console_log_level(void)
 		prlog(PR_NOTICE, "console: Setting driver log level to %i\n",
 		      level & 0x0f);
 	}
-	s = nvram_query("log-level-memory");
+	s = nvram_query_safe("log-level-memory");
 	if (s) {
 		level = console_get_level(s);
 		debug_descriptor.console_log_levels =
@@ -776,7 +771,7 @@ static void setup_branch_null_catcher(void)
         * ABI v1 (ie. big endian).  This will be broken if we ever
         * move to ABI v2 (ie little endian)
         */
-       memcpy(0, bn, 16);
+       memcpy_null(0, bn, 16);
 }
 #else
 static void setup_branch_null_catcher(void)
@@ -813,7 +808,7 @@ void copy_exception_vectors(void)
 	/* Backup previous vectors as this could contain a kernel
 	 * image.
 	 */
-	memcpy(old_vectors, NULL, EXCEPTION_VECTORS_END);
+	memcpy_null(old_vectors, NULL, EXCEPTION_VECTORS_END);
 
 	/* Copy from 0x100 to EXCEPTION_VECTORS_END, avoid below 0x100 as
 	 * this is the boot flag used by CPUs still potentially entering
@@ -854,9 +849,13 @@ static void pci_nvram_init(void)
 {
 	const char *nvram_speed;
 
+	verbose_eeh = nvram_query_eq_safe("pci-eeh-verbose", "true");
+	if (verbose_eeh)
+		prlog(PR_INFO, "PHB: Verbose EEH enabled\n");
+
 	pcie_max_link_speed = 0;
 
-	nvram_speed = nvram_query("pcie-max-link-speed");
+	nvram_speed = nvram_query_dangerous("pcie-max-link-speed");
 	if (nvram_speed) {
 		pcie_max_link_speed = atoi(nvram_speed);
 		prlog(PR_NOTICE, "PHB: NVRAM set max link speed to GEN%i\n",
@@ -890,6 +889,8 @@ static void checksum_romem(void)
 	uint32_t csum;
 
 	romem_csum = 0;
+	if (chip_quirk(QUIRK_SLOW_SIM))
+		return;
 
 	csum = mem_csum(_start, _romem_end);
 	romem_csum ^= csum;
@@ -1045,7 +1046,7 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 	dt_init_misc();
 
 	/*
-	 * Initialize LPC (P8 only) so we can get to UART, BMC and
+	 * Initialize LPC (P8 and beyond) so we can get to UART, BMC and
 	 * other system controller. This is done before probe_platform
 	 * so that the platform probing code can access an external
 	 * BMC if needed.
@@ -1089,9 +1090,9 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 	/* Allocate our split trace buffers now. Depends add_opal_node() */
 	init_trace_buffers();
 
-	/* On P7/P8, get the ICPs and make sure they are in a sane state */
+	/* On P8, get the ICPs and make sure they are in a sane state */
 	init_interrupts();
-	if (proc_gen == proc_gen_p7 || proc_gen == proc_gen_p8)
+	if (proc_gen == proc_gen_p8)
 		cpu_set_ipi_enable(true);
 
 	/* On P9, initialize XIVE */
@@ -1128,6 +1129,9 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 	 * to wall clock time.
 	 */
 	chiptod_init();
+
+	/* Initialize P9 DIO */
+	p9_dio_init();
 
 	/*
 	 * SBE uses TB value for scheduling timer. Hence init after
@@ -1179,6 +1183,14 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 	/* Install the OPAL Console handlers */
 	init_opal_console();
 
+	/*
+	 * Some platforms set a flag to wait for SBE validation to be
+	 * performed by the BMC. If this occurs it leaves the SBE in a
+	 * bad state and the system will reboot at this point.
+	 */
+	if (platform.seeprom_update)
+		platform.seeprom_update();
+
 	/* Init SLW related stuff, including fastsleep */
 	slw_init();
 
@@ -1192,12 +1204,11 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 	 * OCC initialisation as late as possible to give it the
 	 * maximum time to boot up.
 	 */
-	if (!fsp_present())
+	if (platform.bmc)
 		occ_pstates_init();
 
 	pci_nvram_init();
 
-	preload_io_vpd();
 	preload_capp_ucode();
 	start_preload_kernel();
 
@@ -1212,9 +1223,6 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 
 	/* Init In-Memory Collection related stuff (load the IMC dtb into memory) */
 	imc_init();
-
-	/* Probe IO hubs */
-	probe_p7ioc();
 
 	/* Probe PHB3 on P8 */
 	probe_phb3();
@@ -1270,9 +1278,6 @@ void __noreturn __nomcount main_cpu_entry(const void *fdt)
 	cvc_update_reserved_memory_phandle();
 
 	prd_register_reserved_memory();
-
-	/* On P9, switch to radix mode by default */
-	cpu_set_radix_mode();
 
 	checksum_romem();
 

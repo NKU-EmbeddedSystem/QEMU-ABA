@@ -3,7 +3,7 @@
 
 #ifdef CONFIG_CAPSTONE
 
-#include "capstone/include/capstone.h"
+#include <capstone.h>
 
 #else
 

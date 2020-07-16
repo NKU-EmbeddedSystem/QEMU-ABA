@@ -18,7 +18,11 @@
 #include "drivers/drivers.h"
 #include "scsi.h"
 
-typedef struct sd_private {
+typedef struct sd_private sd_private_t;
+typedef struct lsi_table lsi_table_t;
+typedef struct lsi_private lsi_private_t;
+
+struct sd_private {
     unsigned int bs;
     const char *media_str[2];
     uint32_t sectors;
@@ -26,9 +30,10 @@ typedef struct sd_private {
     uint8_t id;
     uint8_t present;
     char model[40];
-} sd_private_t;
+    lsi_private_t *lsi;
+};
 
-typedef struct lsi_table {
+struct lsi_table {
     uint32_t id;
     uint32_t id_addr;
     uint32_t msg_out_len;
@@ -41,9 +46,9 @@ typedef struct lsi_table {
     uint32_t status_ptr;
     uint32_t msg_in_len;
     uint32_t msg_in_ptr;
-} lsi_table_t;
+};
 
-typedef struct lsi_private {
+struct lsi_private {
     volatile uint8_t *mmio;
     uint32_t *scripts;
     uint32_t *scripts_iova;
@@ -52,9 +57,7 @@ typedef struct lsi_private {
     volatile uint8_t *buffer;
     volatile uint8_t *buffer_iova;
     sd_private_t sd[8];
-} lsi_private_t;
-
-static lsi_private_t *global_lsi;
+};
 
 #ifdef CONFIG_DEBUG_LSI
 #define DPRINTF(fmt, args...)                   \
@@ -504,6 +507,7 @@ ob_sd_read_blocks(sd_private_t **sd)
     ucell blk = POP();
     char *dest = (char*)POP();
     int pos, spb, sect_offset;
+    lsi_private_t *lsi = (*sd)->lsi;
 
     DPRINTF("ob_sd_read_blocks id %d %lx block=%d n=%d\n", (*sd)->id, (unsigned long)dest, blk, n );
 
@@ -516,12 +520,12 @@ ob_sd_read_blocks(sd_private_t **sd)
         sect_offset = blk / spb;
         pos = (blk - sect_offset * spb) * 512;
 
-        if (ob_sd_read_sector(global_lsi, *sd, sect_offset)) {
+        if (ob_sd_read_sector(lsi, *sd, sect_offset)) {
             DPRINTF("ob_sd_read_blocks: error\n");
             RET(0);
         }
         while (n && pos < spb * 512) {
-            memcpy(dest, (uint8_t *)&global_lsi->buffer[LSI_TABLE_DATA_OFFSET] + pos, 512);
+            memcpy(dest, (uint8_t *)&lsi->buffer[LSI_TABLE_DATA_OFFSET] + pos, 512);
             pos += 512;
             dest += 512;
             n--;
@@ -540,12 +544,12 @@ ob_sd_block_size(__attribute__((unused))sd_private_t **sd)
 static void
 ob_sd_open(__attribute__((unused))sd_private_t **sd)
 {
-    int ret = 1, id;
+    int ret = 1;
     phandle_t ph;
 
-    fword("my-unit");
-    id = POP();
-    *sd = &global_lsi->sd[id];
+    PUSH(find_ih_method("sd-private", my_self()));
+    fword("execute");
+    *sd = cell2pointer(POP());
 
 #ifdef CONFIG_DEBUG_LSI
     {
@@ -553,7 +557,7 @@ ob_sd_open(__attribute__((unused))sd_private_t **sd)
 
         fword("my-args");
         args = pop_fstr_copy();
-        DPRINTF("opening drive %d args %s\n", id, args);
+        DPRINTF("opening drive args %s\n", args);
         free(args);
     }
 #endif
@@ -624,13 +628,12 @@ NODE_METHODS(ob_lsi) = {
 static void
 add_alias(const char *device, const char *alias)
 {
+    phandle_t aliases;
+
     DPRINTF("add_alias dev \"%s\" = alias \"%s\"\n", device, alias);
-    push_str("/aliases");
-    fword("find-device");
-    push_str(device);
-    fword("encode-string");
-    push_str(alias);
-    fword("property");
+
+    aliases = find_dev("/aliases");
+    set_property(aliases, alias, device, strlen(device) + 1);
 }
 
 int
@@ -643,7 +646,7 @@ ob_lsi_init(const char *path, uint64_t mmio, uint64_t ram)
     int i;
     ucell addr;
 
-    REGISTER_NODE_METHODS(ob_lsi, path);
+    BIND_NODE_METHODS(ph, ob_lsi);
 
     lsi = malloc(sizeof(lsi_private_t));
     if (!lsi) {
@@ -651,13 +654,7 @@ ob_lsi_init(const char *path, uint64_t mmio, uint64_t ram)
         return -1;
     }
 
-    global_lsi = lsi;
-
     /* Buffer for commands */
-    fword("my-self");
-    push_str(path);
-    feval("open-dev to my-self");
-
     PUSH(0x1000);
     feval("dma-alloc");
     addr = POP();
@@ -696,7 +693,6 @@ ob_lsi_init(const char *path, uint64_t mmio, uint64_t ram)
 
     set_int_property(ph, "#address-cells", 1);
     set_int_property(ph, "#size-cells", 0);
-    feval("to my-self");
 
     /* Initialise SCRIPTS */
     lsi->mmio = (uint8_t *)(uint32_t)mmio;
@@ -732,6 +728,9 @@ ob_lsi_init(const char *path, uint64_t mmio, uint64_t ram)
     for (id = 0; id < 8; id++) {
         if (!lsi->sd[id].present)
             continue;
+
+        lsi->sd[id].lsi = lsi;
+
         fword("new-device");
         push_str("sd");
         fword("device-name");
@@ -745,10 +744,16 @@ ob_lsi_init(const char *path, uint64_t mmio, uint64_t ram)
         fword("encode+");
         push_str("reg");
         fword("property");
+
+        PUSH(pointer2cell(&lsi->sd[id]));
+        feval("value sd-private");
+
+        BIND_NODE_METHODS(get_cur_dev(), ob_sd);
         fword("finish-device");
+
         snprintf(nodebuff, sizeof(nodebuff), "%s/sd@%d",
                  get_path_from_ph(ph), id);
-        REGISTER_NODE_METHODS(ob_sd, nodebuff);
+
         if (lsi->sd[id].media == TYPE_ROM) {
             counter_ptr = &cdcount;
         } else {

@@ -72,8 +72,11 @@ mconfig rootdisk_cow_hash MAMBO_ROOTDISK_COW_HASH 1024
 # Net: What type of networking: none, phea, bogus
 mconfig net MAMBO_NET none
 
-# Net: What is the base interface for the tun/tap device
-mconfig tap_base MAMBO_NET_TAP_BASE 0
+# Net: What MAC address to use
+mconfig net_mac MAMBO_NET_MAC 00:11:22:33:44:55
+
+# Net: What is the name of the tap device
+mconfig net_tapdev MAMBO_NET_TAPDEV "tap0"
 
 # Enable (default) or disable the "speculation-policy-favor-security" setting,
 # set to 0 to disable. When enabled it causes Linux's RFI flush to be enabled.
@@ -108,8 +111,8 @@ if { $default_config == "PEGASUS" } {
 }
 
 if { $default_config == "P9" } {
-    # PVR configured for POWER9 DD2.0 Scale out 24 Core (ie SMT4)
-    myconf config processor/initial/PVR 0x4e1200
+    # PVR configured for POWER9 DD2.3 Scale out 24 Core (ie SMT4)
+    myconf config processor/initial/PVR 0x4e1203
     myconf config processor/initial/SIM_CTRL1 0xc228100400000000
 
     if { $mconf(numa) } {
@@ -141,19 +144,30 @@ if {![info exists of::encode_compat]} {
 if { [file exists mambo_utils.tcl] } then {
 	source mambo_utils.tcl
 
+	if { [info exists env(USER_MAP)] } {
+		global user_symbol_map user_symbol_list
+
+		set fp [open $env(USER_MAP) r]
+		set user_symbol_map [read $fp]
+	        set user_symbol_list [split $user_symbol_map "\n"]
+		close $fp
+	}
+
 	if { [info exists env(VMLINUX_MAP)] } {
-		global linux_symbol_map
+		global linux_symbol_map linux_symbol_list
 
 		set fp [open $env(VMLINUX_MAP) r]
 		set linux_symbol_map [read $fp]
+	        set linux_symbol_list [split $linux_symbol_map "\n"]
 		close $fp
 	}
 
 	if { [info exists env(SKIBOOT_MAP)] } {
-		global skiboot_symbol_map
+		global skiboot_symbol_map skiboot_symbol_list
 
 		set fp [open $env(SKIBOOT_MAP) r]
 		set skiboot_symbol_map [read $fp]
+	        set skiboot_symbol_list [split $skiboot_symbol_map "\n"]
 		close $fp
 	}
 }
@@ -186,8 +200,7 @@ switch $mconf(net) {
 	puts "No network support selected"
     }
     bogus - bogusnet {
-	set net_tap [format "tap%d" $mconf(tap_base)]
-	mysim bogus net init 0 $mconf(net_mac) $net_tap
+        mysim bogus net init 0 $mconf(net_mac) $mconf(net_tapdev)
     }
     default {
 	error "Bad net \[none | bogus]: $mconf(net)"
@@ -221,6 +234,10 @@ lappend compat "ibm,power8-xscom"
 set compat [of::encode_compat $compat]
 mysim of addprop $xscom_node byte_array "compatible" $compat
 
+set chosen_node [mysim of find_device /chosen]
+set base_addr [list $mconf(payload_addr)]
+mysim of addprop $chosen_node array64 "kernel-base-address" base_addr
+
 # Load any initramfs
 set cpio_start 0x80000000
 set cpio_end $cpio_start
@@ -236,7 +253,6 @@ if { [info exists env(SKIBOOT_INITRD)] } {
 	    set cpio_end [expr $cpio_end + $cpio_size]
     }
 
-    set chosen_node [mysim of find_device /chosen]
     mysim of addprop $chosen_node int "linux,initrd-start" $cpio_start
     mysim of addprop $chosen_node int "linux,initrd-end"   $cpio_end
 }
@@ -505,6 +521,27 @@ if { $default_config == "P9" } {
      mysim of addprop  $thread string "scale" "512"
      mysim of addprop  $thread int "events" $ct_et
      mysim of addprop  $thread int "type" 1
+
+      #Add a common trace event  node
+      set tr_et [mysim of addchild $imc_c "trace-events" ""]
+      mysim of addprop $tr_et int "#address-cells" 1
+      mysim of addprop $tr_et int "#size-cells" 1
+
+         #Add an event
+         set tr [mysim of addchild $tr_et event [format 10200000]]
+         mysim of addprop  $tr string "event-name" "cycles"
+         mysim of addprop  $tr string "desc" "Reference cycles"
+         mysim of addprop  $tr int "reg" 0x10200000
+
+     #Add a trace device node
+     set trace [mysim of addchild $imc_c "trace" ""]
+     mysim of addprop $trace string "compatible" "ibm,imc-counters"
+     mysim of addprop  $trace string "events-prefix" "trace_"
+     mysim of addprop  $trace int "reg" 0
+     mysim of addprop  $trace int "size" 262144
+     mysim of addprop  $trace int "events" $tr_et
+     mysim of addprop  $trace int "type" 2
+
 }
 
 mconfig enable_stb SKIBOOT_ENABLE_MAMBO_STB 0
@@ -549,14 +586,28 @@ mysim memory fread $mconf(boot_load) $boot_size $mconf(boot_image)
 set payload_size [file size $mconf(payload)]
 mysim memory fread $mconf(payload_addr) $payload_size $mconf(payload)
 
+if { $payload_size > [expr $mconf(boot_load) - $mconf(payload_addr)] } {
+	error "vmlinux is too large, consider adjusting PAYLOAD_ADDR"
+}
+
 # Flatten it
 epapr::of2dtb mysim $mconf(epapr_dt_addr)
 
 # Set run speed
 mysim mode fastest
 
+if { [info exists env(GDB_SERVER)] } {
+    mysim debugger wait $env(GDB_SERVER)
+}
+
 if { [info exists env(SKIBOOT_AUTORUN)] } {
     if [catch { mysim go }] {
 	readline
     }
+} else {
+	readline
+}
+
+if { [info exists env(SKIBOOT_AUTORUN)] && $env(SKIBOOT_AUTORUN) == 2 } {
+    quit
 }

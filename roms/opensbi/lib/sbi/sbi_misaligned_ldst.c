@@ -27,9 +27,18 @@ int sbi_misaligned_load_handler(u32 hartid, ulong mcause,
 {
 	union reg_data val;
 	struct unpriv_trap uptrap;
-	ulong insn = get_insn(regs->mepc, NULL);
 	ulong addr = csr_read(CSR_MTVAL);
 	int i, fp = 0, shift = 0, len = 0;
+#if __riscv_xlen == 32
+	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? TRUE : FALSE;
+#else
+	bool virt = (regs->mstatus & MSTATUS_MPV) ? TRUE : FALSE;
+#endif
+	ulong insn = get_insn(regs->mepc, virt, scratch, &uptrap);
+
+	if (uptrap.cause)
+		return sbi_trap_redirect(regs, scratch, regs->mepc,
+					 uptrap.cause, uptrap.tval);
 
 	if ((insn & INSN_MASK_LW) == INSN_MATCH_LW) {
 		len   = 4;
@@ -41,12 +50,14 @@ int sbi_misaligned_load_handler(u32 hartid, ulong mcause,
 	} else if ((insn & INSN_MASK_LWU) == INSN_MATCH_LWU) {
 		len = 4;
 #endif
+#ifdef __riscv_flen
 	} else if ((insn & INSN_MASK_FLD) == INSN_MATCH_FLD) {
 		fp  = 1;
 		len = 8;
 	} else if ((insn & INSN_MASK_FLW) == INSN_MATCH_FLW) {
 		fp  = 1;
 		len = 4;
+#endif
 	} else if ((insn & INSN_MASK_LH) == INSN_MATCH_LH) {
 		len   = 2;
 		shift = 8 * (sizeof(ulong) - len);
@@ -71,6 +82,7 @@ int sbi_misaligned_load_handler(u32 hartid, ulong mcause,
 		   ((insn >> SH_RD) & 0x1f)) {
 		len   = 4;
 		shift = 8 * (sizeof(ulong) - len);
+#ifdef __riscv_flen
 	} else if ((insn & INSN_MASK_C_FLD) == INSN_MATCH_C_FLD) {
 		fp   = 1;
 		len  = 8;
@@ -88,26 +100,28 @@ int sbi_misaligned_load_handler(u32 hartid, ulong mcause,
 		len = 4;
 #endif
 #endif
+#endif
 	} else
-		return SBI_EILL;
+		return sbi_trap_redirect(regs, scratch, regs->mepc,
+					 mcause, addr);
 
 	val.data_u64 = 0;
 	for (i = 0; i < len; i++) {
 		val.data_bytes[i] = load_u8((void *)(addr + i),
 					    scratch, &uptrap);
-		if (uptrap.cause) {
-			sbi_trap_redirect(regs, scratch, regs->mepc,
-					  uptrap.cause, uptrap.tval);
-			return 0;
-		}
+		if (uptrap.cause)
+			return sbi_trap_redirect(regs, scratch, regs->mepc,
+						 uptrap.cause, uptrap.tval);
 	}
 
 	if (!fp)
 		SET_RD(insn, regs, val.data_ulong << shift >> shift);
+#ifdef __riscv_flen
 	else if (len == 8)
 		SET_F64_RD(insn, regs, val.data_u64);
 	else
 		SET_F32_RD(insn, regs, val.data_ulong);
+#endif
 
 	regs->mepc += INSN_LEN(insn);
 
@@ -120,9 +134,18 @@ int sbi_misaligned_store_handler(u32 hartid, ulong mcause,
 {
 	union reg_data val;
 	struct unpriv_trap uptrap;
-	ulong insn = get_insn(regs->mepc, NULL);
 	ulong addr = csr_read(CSR_MTVAL);
 	int i, len = 0;
+#if __riscv_xlen == 32
+	bool virt = (regs->mstatusH & MSTATUSH_MPV) ? TRUE : FALSE;
+#else
+	bool virt = (regs->mstatus & MSTATUS_MPV) ? TRUE : FALSE;
+#endif
+	ulong insn = get_insn(regs->mepc, virt, scratch, &uptrap);
+
+	if (uptrap.cause)
+		return sbi_trap_redirect(regs, scratch, regs->mepc,
+					 uptrap.cause, uptrap.tval);
 
 	val.data_ulong = GET_RS2(insn, regs);
 
@@ -132,12 +155,14 @@ int sbi_misaligned_store_handler(u32 hartid, ulong mcause,
 	} else if ((insn & INSN_MASK_SD) == INSN_MATCH_SD) {
 		len = 8;
 #endif
+#ifdef __riscv_flen
 	} else if ((insn & INSN_MASK_FSD) == INSN_MATCH_FSD) {
 		len	     = 8;
 		val.data_u64 = GET_F64_RS2(insn, regs);
 	} else if ((insn & INSN_MASK_FSW) == INSN_MATCH_FSW) {
 		len	       = 4;
 		val.data_ulong = GET_F32_RS2(insn, regs);
+#endif
 	} else if ((insn & INSN_MASK_SH) == INSN_MATCH_SH) {
 		len = 2;
 #ifdef __riscv_compressed
@@ -157,6 +182,7 @@ int sbi_misaligned_store_handler(u32 hartid, ulong mcause,
 		   ((insn >> SH_RD) & 0x1f)) {
 		len	       = 4;
 		val.data_ulong = GET_RS2C(insn, regs);
+#ifdef __riscv_flen
 	} else if ((insn & INSN_MASK_C_FSD) == INSN_MATCH_C_FSD) {
 		len	     = 8;
 		val.data_u64 = GET_F64_RS2S(insn, regs);
@@ -172,17 +198,17 @@ int sbi_misaligned_store_handler(u32 hartid, ulong mcause,
 		val.data_ulong = GET_F32_RS2C(insn, regs);
 #endif
 #endif
+#endif
 	} else
-		return SBI_EILL;
+		return sbi_trap_redirect(regs, scratch, regs->mepc,
+					 mcause, addr);
 
 	for (i = 0; i < len; i++) {
 		store_u8((void *)(addr + i), val.data_bytes[i],
 			 scratch, &uptrap);
-		if (uptrap.cause) {
-			sbi_trap_redirect(regs, scratch, regs->mepc,
-					  uptrap.cause, uptrap.tval);
-			return 0;
-		}
+		if (uptrap.cause)
+			return sbi_trap_redirect(regs, scratch, regs->mepc,
+						 uptrap.cause, uptrap.tval);
 	}
 
 	regs->mepc += INSN_LEN(insn);

@@ -107,7 +107,6 @@ void _prlog(int log_level, const char* fmt, ...) __attribute__((format (printf, 
 /* Processor generation */
 enum proc_gen {
 	proc_gen_unknown,
-	proc_gen_p7,		/* P7 and P7+ */
 	proc_gen_p8,
 	proc_gen_p9,
 };
@@ -203,7 +202,6 @@ extern void copy_sreset_vector(void);
 extern void copy_sreset_vector_fast_reboot(void);
 
 /* Various probe routines, to replace with an initcall system */
-extern void probe_p7ioc(void);
 extern void probe_phb3(void);
 extern void probe_phb4(void);
 extern int preload_capp_ucode(void);
@@ -291,6 +289,8 @@ extern void prd_init(void);
 extern void prd_register_reserved_memory(void);
 extern void prd_fsp_occ_reset(uint32_t proc);
 extern void prd_fsp_occ_load_start(u32 proc);
+extern void prd_fw_resp_fsp_response(int status);
+extern int  prd_hbrt_fsp_msg_notify(void *data, u32 dsize);
 
 /* Flatten device-tree */
 extern void *create_dtb(const struct dt_node *root, bool exclusive);

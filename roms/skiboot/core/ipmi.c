@@ -149,7 +149,7 @@ void ipmi_cmd_done(uint8_t cmd, uint8_t netfn, uint8_t cc, struct ipmi_msg *msg)
 
 	if (cc != IPMI_CC_NO_ERROR) {
 		prlog(PR_DEBUG, "IPMI: Got error response. cmd=0x%x, netfn=0x%x,"
-		      " rc=0x%02x\n", msg->cmd, msg->netfn, msg->cc);
+		      " rc=0x%02x\n", msg->cmd, msg->netfn >> 2, msg->cc);
 
 		assert(msg->error);
 		msg->error(msg);
@@ -182,8 +182,18 @@ void ipmi_queue_msg_sync(struct ipmi_msg *msg)
 	ipmi_queue_msg_head(msg);
 	unlock(&sync_lock);
 
-	while (sync_msg == msg)
+	/*
+	 * BT response handling relies on a timer. We can't just run all
+	 * timers because we may have been called with a lock that a timer
+	 * wants, and they're generally not written to cope with that.
+	 * So, just run whatever the IPMI backend needs to make forward
+	 * progress.
+	 */
+	while (sync_msg == msg) {
+		if (msg->backend->poll)
+			msg->backend->poll();
 		time_wait_ms(10);
+	}
 }
 
 static void ipmi_read_event_complete(struct ipmi_msg *msg)

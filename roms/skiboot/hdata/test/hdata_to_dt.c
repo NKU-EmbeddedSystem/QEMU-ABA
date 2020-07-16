@@ -1,4 +1,4 @@
-/* Copyright 2013-2014 IBM Corp.
+/* Copyright 2013-2019 IBM Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,15 +63,11 @@ unsigned long tb_hz = 512000000;
 #define PVR_VERS_MIN(_pvr)	GETFIELD(SPR_PVR_VERS_MIN, _pvr)
 
 /* PVR definitions - copied from skiboot include/processor.h */
-#define PVR_TYPE_P7	0x003f
-#define PVR_TYPE_P7P	0x004a
 #define PVR_TYPE_P8E	0x004b
 #define PVR_TYPE_P8	0x004d
 #define PVR_TYPE_P8NVL	0x004c
 #define PVR_TYPE_P9	0x004e
 #define PVR_TYPE_P9P	0x004f
-#define PVR_P7		0x003f0201
-#define PVR_P7P		0x004a0201
 #define PVR_P8E		0x004b0201
 #define PVR_P8		0x004d0200
 #define PVR_P8NVL	0x004c0100
@@ -103,7 +99,7 @@ static inline struct cpu_job *cpu_queue_job(struct cpu_thread *cpu,
 }
 
 struct cpu_thread __boot_cpu, *boot_cpu = &__boot_cpu;
-static unsigned long fake_pvr = PVR_P7;
+static unsigned long fake_pvr = PVR_P8;
 
 static inline unsigned long mfspr(unsigned int spr)
 {
@@ -168,9 +164,25 @@ static bool spira_check_ptr(const void *ptr, const char *file, unsigned int line
 
 #include <err.h>
 
+#include <op-panel.h>
+
+bool fsp_present()
+{
+	return false;
+}
+
+void op_display(enum op_severity s, enum op_module m, uint16_t code)
+{
+	fprintf(stderr, "op_panel Severity: 0x%x (%s), module %x, %x\n",
+		s, (s == OP_FATAL) ? "FATAL" : "non-fatal",
+		m, code);
+	if (s == OP_FATAL)
+		exit(EXIT_FAILURE);
+}
+
 char __rodata_start[1], __rodata_end[1];
 
-enum proc_gen proc_gen = proc_gen_p7;
+enum proc_gen proc_gen = proc_gen_p8;
 
 static bool spira_check_ptr(const void *ptr, const char *file, unsigned int line)
 {
@@ -300,10 +312,6 @@ int main(int argc, char *argv[])
 		} else if (strcmp(argv[i], "-b") == 0) {
 			blobs = true;
 			opt_count++;
-		} else if (strcmp(argv[i], "-7") == 0) {
-			fake_pvr = PVR_P7;
-			proc_gen = proc_gen_p7;
-			opt_count++;
 		} else if (strcmp(argv[i], "-8E") == 0) {
 			fake_pvr = PVR_P8;
 			proc_gen = proc_gen_p8;
@@ -336,7 +344,6 @@ int main(int argc, char *argv[])
 		     "	-q Quiet mode\n"
 		     "	-b Keep blobs in the output\n"
 		     "\n"
-		     "  -7 Force PVR to POWER7\n"
 		     "  -8 Force PVR to POWER8\n"
 		     "  -8E Force PVR to POWER8E\n"
 		     "  -9 Force PVR to POWER9 (nimbus)\n"

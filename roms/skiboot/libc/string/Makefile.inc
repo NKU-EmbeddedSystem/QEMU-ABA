@@ -12,10 +12,12 @@
 
 SUBDIRS += $(LIBCDIR)/string
 
-STRING_OBJS = strcat.o strchr.o strcmp.o strcpy.o strlen.o \
+STRING_OBJS = strcat.o strchr.o strrchr.o strcmp.o strcpy.o strlen.o \
 	      strncmp.o strncpy.o strstr.o memset.o memcpy.o memcpy_from_ci.o \
 	      memmove.o memchr.o memcmp.o strcasecmp.o strncasecmp.o \
 	      strtok.o strdup.o
 STRING = $(LIBCDIR)/string/built-in.a
 $(STRING): $(STRING_OBJS:%=$(LIBCDIR)/string/%)
 
+CFLAGS_SKIP_libc/string/ += -Os
+CFLAGS_libc/string/ += -O2

@@ -20,7 +20,6 @@
 #include <pci.h>
 #include <pci-slot.h>
 #include <pci-virt.h>
-#include <interrupts.h>
 #include <opal.h>
 #include <opal-api.h>
 #include <cpu.h>
@@ -35,13 +34,8 @@
 #include <chip.h>
 #include <phys-map.h>
 #include <nvram.h>
-#include <xive.h>
 #include <xscom-p9-regs.h>
 #include <phb4.h>
-
-#define NPU2_IRQ_BASE_SHIFT 13
-#define NPU2_N_DL_IRQS 23
-#define NPU2_N_DL_IRQS_ALIGN 64
 
 #define VENDOR_CAP_START    0x80
 #define VENDOR_CAP_END      0x90
@@ -342,7 +336,7 @@ static int wait_l2_purge(uint32_t chip_id, uint32_t core_id)
 	uint64_t val;
 	uint64_t addr = XSCOM_ADDR_P9_EX(core_id, L2_PRD_PURGE_CMD_REG);
 	unsigned long now = mftb();
-	unsigned long end = now + msecs_to_tb(2);
+	unsigned long end = now + msecs_to_tb(L2_L3_PRD_PURGE_TIMEOUT_MS);
 	int rc;
 
 	while (1) {
@@ -392,7 +386,7 @@ static int wait_l3_purge(uint32_t chip_id, uint32_t core_id)
 	uint64_t val;
 	uint64_t addr = XSCOM_ADDR_P9_EX(core_id, L3_PRD_PURGE_REG);
 	unsigned long now = mftb();
-	unsigned long end = now + msecs_to_tb(2);
+	unsigned long end = now + msecs_to_tb(L2_L3_PRD_PURGE_TIMEOUT_MS);
 	int rc;
 
 	/* Trigger bit is automatically set to zero when flushing is done */
@@ -420,6 +414,7 @@ static int64_t purge_l2_l3_caches(void)
 	struct cpu_thread *t;
 	uint64_t core_id, prev_core_id = (uint64_t)-1;
 	int rc;
+	unsigned long now = mftb();
 
 	for_each_ungarded_cpu(t) {
 		/* Only need to do it once per core chiplet */
@@ -429,10 +424,10 @@ static int64_t purge_l2_l3_caches(void)
 		prev_core_id = core_id;
 		rc = start_l2_purge(t->chip_id, core_id);
 		if (rc)
-			return rc;
+			goto trace_exit;
 		rc = start_l3_purge(t->chip_id, core_id);
 		if (rc)
-			return rc;
+			goto trace_exit;
 	}
 
 	prev_core_id = (uint64_t)-1;
@@ -445,12 +440,17 @@ static int64_t purge_l2_l3_caches(void)
 
 		rc = wait_l2_purge(t->chip_id, core_id);
 		if (rc)
-			return rc;
+			goto trace_exit;
 		rc = wait_l3_purge(t->chip_id, core_id);
 		if (rc)
-			return rc;
+			goto trace_exit;
 	}
-	return OPAL_SUCCESS;
+
+trace_exit:
+	prlog(PR_TRACE, "L2/L3 purging took %ldus\n",
+			tb_to_usecs(mftb() - now));
+
+	return rc;
 }
 
 static int64_t npu2_dev_cfg_exp_devcap(void *dev,
@@ -543,6 +543,54 @@ static int __npu2_dev_bind_pci_dev(struct phb *phb __unused,
 	return 0;
 }
 
+static int64_t npu2_gpu_bridge_sec_bus_reset(void *dev,
+		struct pci_cfg_reg_filter *pcrf __unused,
+		uint32_t offset, uint32_t len,
+		uint32_t *data, bool write)
+{
+	struct pci_device *pd = dev;
+	struct pci_device *gpu;
+	struct phb *npphb;
+	struct npu2 *npu;
+	struct dt_node *np;
+	struct npu2_dev	*ndev;
+	int i;
+
+	assert(write);
+
+	if ((len != 2) || (offset & 1)) {
+		/* Short config writes are not supported */
+		PCIERR(pd->phb, pd->bdfn,
+		       "Unsupported write to bridge control register\n");
+		return OPAL_PARAMETER;
+	}
+
+	gpu = list_top(&pd->children, struct pci_device, link);
+	if (gpu && (*data & PCI_CFG_BRCTL_SECONDARY_RESET)) {
+		int64_t rc;
+
+		dt_for_each_compatible(dt_root, np, "ibm,power9-npu-pciex") {
+			npphb = pci_get_phb(dt_prop_get_cell(np,
+					"ibm,opal-phbid", 1));
+			if (!npphb || npphb->phb_type != phb_type_npu_v2)
+				continue;
+
+			npu = phb_to_npu2_nvlink(npphb);
+			for (i = 0; i < npu->total_devices; ++i) {
+				ndev = &npu->devices[i];
+				if (ndev->nvlink.pd == gpu)
+					npu2_dev_procedure_reset(ndev);
+			}
+		}
+
+		rc = purge_l2_l3_caches();
+		if (rc)
+			return rc;
+	}
+
+	return OPAL_PARTIAL;
+}
+
 static void npu2_dev_bind_pci_dev(struct npu2_dev *dev)
 {
 	struct phb *phb;
@@ -564,6 +612,19 @@ static void npu2_dev_bind_pci_dev(struct npu2_dev *dev)
 			dev->nvlink.phb = phb;
 			/* Found the device, set the bit in config space */
 			npu2_set_link_flag(dev, NPU2_DEV_PCI_LINKED);
+
+			/*
+			 * We define a custom sec bus reset handler for a slot
+			 * with an NVLink-connected GPU to prevent HMIs which
+			 * will otherwise happen if we reset GPU before
+			 * resetting NVLinks.
+			 */
+			if (dev->nvlink.pd->parent &&
+			    dev->nvlink.pd->parent->slot)
+				pci_add_cfg_reg_filter(dev->nvlink.pd->parent,
+						PCI_CFG_BRCTL, 2,
+						PCI_REG_FLAG_WRITE,
+						npu2_gpu_bridge_sec_bus_reset);
 			return;
 		}
 	}
@@ -1391,7 +1452,6 @@ static const struct phb_ops npu_ops = {
 	.eeh_freeze_set		= NULL,
 	.next_error		= npu2_eeh_next_error,
 	.err_inject		= NULL,
-	.get_diag_data		= NULL,
 	.get_diag_data2		= NULL,
 	.set_capi_mode		= NULL,
 	.set_capp_recovery	= NULL,
@@ -1458,7 +1518,7 @@ static void assign_mmio_bars(uint64_t gcid, uint32_t scom, uint64_t reg[2], uint
 int npu2_nvlink_init_npu(struct npu2 *npu)
 {
 	struct dt_node *np;
-	uint64_t reg[2], mm_win[2], val;
+	uint64_t reg[2], mm_win[2], val, mask;
 
 	/* TODO: Clean this up with register names, etc. when we get
 	 * time. This just turns NVLink mode on in each brick and should
@@ -1467,18 +1527,48 @@ int npu2_nvlink_init_npu(struct npu2 *npu)
 	 *
 	 * Obviously if the year is now 2020 that didn't happen and you
 	 * should fix this :-) */
-	xscom_write_mask(npu->chip_id, 0x5011000, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011030, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011060, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011090, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011200, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011230, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011260, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011290, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011400, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011430, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011460, PPC_BIT(58), PPC_BIT(58));
-	xscom_write_mask(npu->chip_id, 0x5011490, PPC_BIT(58), PPC_BIT(58));
+
+	val = PPC_BIT(58);
+	mask = PPC_BIT(58) | /* CONFIG_NVLINK_MODE */
+	       PPC_BIT(40); /* CONFIG_ENABLE_SNARF_CPM */
+
+	/*
+	 * V100 GPUs are known to violate NVLink2 protocol if some GPU memory
+	 * mapped by a CPU was also "linear-block" mapped by a GPU. When this
+	 * happens, it breaks the NPU2 cache coherency state machine and
+	 * it throws machine checkstop. Disabling snarfing fixes this so let's
+	 * disable it by default.
+	 */
+	if (nvram_query_eq_dangerous("opal-npu2-snarf-cpm", "enable")) {
+		prlog(PR_WARNING, "NPU2#%d: enabling Probe.I.MO snarfing, a bad GPU driver may crash the system!\n",
+				npu->index);
+		val |= PPC_BIT(40); /* CONFIG_ENABLE_SNARF_CPM */
+	}
+
+	xscom_write_mask(npu->chip_id, NPU_STCK0_CS_SM0_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK0_CS_SM1_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK0_CS_SM2_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK0_CS_SM3_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK1_CS_SM0_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK1_CS_SM1_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK1_CS_SM2_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK1_CS_SM3_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK2_CS_SM0_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK2_CS_SM1_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK2_CS_SM2_MISC_CONFIG0,
+			 val, mask);
+	xscom_write_mask(npu->chip_id, NPU_STCK2_CS_SM3_MISC_CONFIG0,
+			 val, mask);
 
 	xscom_write_mask(npu->chip_id, 0x50110c0, PPC_BIT(53), PPC_BIT(53));
 	xscom_write_mask(npu->chip_id, 0x50112c0, PPC_BIT(53), PPC_BIT(53));
@@ -1922,99 +2012,6 @@ static void npu2_add_phb_properties(struct npu2 *p)
 			      hi32(mm_size), lo32(mm_size));
 }
 
-static uint64_t npu2_ipi_attributes(struct irq_source *is __unused, uint32_t isn __unused)
-{
-	struct npu2 *p = is->data;
-	uint32_t idx = isn - p->base_lsi;
-
-	if (idx == 18)
-		/* TCE Interrupt - used to detect a frozen PE */
-		return IRQ_ATTR_TARGET_OPAL | IRQ_ATTR_TARGET_RARE | IRQ_ATTR_TYPE_MSI;
-	else
-		return IRQ_ATTR_TARGET_LINUX;
-}
-
-static char *npu2_ipi_name(struct irq_source *is, uint32_t isn)
-{
-	struct npu2 *p = is->data;
-	uint32_t idx = isn - p->base_lsi;
-	const char *name;
-
-	switch (idx) {
-	case 0: name = "NDL 0 Stall Event (brick 0)"; break;
-	case 1: name = "NDL 0 No-Stall Event (brick 0)"; break;
-	case 2: name = "NDL 1 Stall Event (brick 1)"; break;
-	case 3: name = "NDL 1 No-Stall Event (brick 1)"; break;
-	case 4: name = "NDL 2 Stall Event (brick 2)"; break;
-	case 5: name = "NDL 2 No-Stall Event (brick 2)"; break;
-	case 6: name = "NDL 5 Stall Event (brick 3)"; break;
-	case 7: name = "NDL 5 No-Stall Event (brick 3)"; break;
-	case 8: name = "NDL 4 Stall Event (brick 4)"; break;
-	case 9: name = "NDL 4 No-Stall Event (brick 4)"; break;
-	case 10: name = "NDL 3 Stall Event (brick 5)"; break;
-	case 11: name = "NDL 3 No-Stall Event (brick 5)"; break;
-	case 12: name = "NTL 0 Event"; break;
-	case 13: name = "NTL 1 Event"; break;
-	case 14: name = "NTL 2 Event"; break;
-	case 15: name = "NTL 3 Event"; break;
-	case 16: name = "NTL 4 Event"; break;
-	case 17: name = "NTL 5 Event"; break;
-	case 18: name = "TCE Event"; break;
-	case 19: name = "ATS Event"; break;
-	case 20: name = "CQ Event"; break;
-	case 21: name = "MISC Event"; break;
-	case 22: name = "NMMU Local Xstop"; break;
-	default: name = "Unknown";
-	}
-	return strdup(name);
-}
-
-static void npu2_err_interrupt(struct irq_source *is, uint32_t isn)
-{
-	struct npu2 *p = is->data;
-	uint32_t idx = isn - p->base_lsi;
-
-	if (idx != 18) {
-		prerror("OPAL received unknown NPU2 interrupt %d\n", idx);
-		return;
-	}
-
-	opal_update_pending_evt(OPAL_EVENT_PCI_ERROR,
-				OPAL_EVENT_PCI_ERROR);
-}
-
-static const struct irq_source_ops npu2_ipi_ops = {
-	.interrupt	= npu2_err_interrupt,
-	.attributes	= npu2_ipi_attributes,
-	.name = npu2_ipi_name,
-};
-
-static void npu2_setup_irqs(struct npu2 *p)
-{
-	uint64_t reg, val;
-	void *tp;
-
-	p->base_lsi = xive_alloc_ipi_irqs(p->chip_id, NPU2_N_DL_IRQS, NPU2_N_DL_IRQS_ALIGN);
-	if (p->base_lsi == XIVE_IRQ_ERROR) {
-		prlog(PR_ERR, "NPU: Failed to allocate interrupt sources, IRQs for NDL No-stall events will not be available.\n");
-		return;
-	}
-	xive_register_ipi_source(p->base_lsi, NPU2_N_DL_IRQS, p, &npu2_ipi_ops );
-
-	/* Set IPI configuration */
-	reg = NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, NPU2_MISC_CFG);
-	val = npu2_read(p, reg);
-	val = SETFIELD(NPU2_MISC_CFG_IPI_PS, val, NPU2_MISC_CFG_IPI_PS_64K);
-	val = SETFIELD(NPU2_MISC_CFG_IPI_OS, val, NPU2_MISC_CFG_IPI_OS_AIX);
-	npu2_write(p, reg, val);
-
-	/* Set IRQ base */
-	reg = NPU2_REG_OFFSET(NPU2_STACK_MISC, NPU2_BLOCK_MISC, NPU2_MISC_IRQ_BASE);
-	tp = xive_get_trigger_port(p->base_lsi);
-	val = ((uint64_t)tp) << NPU2_IRQ_BASE_SHIFT;
-	npu2_write(p, reg, val);
-}
-
 void npu2_nvlink_create_phb(struct npu2 *npu, struct dt_node *dn)
 {
 	struct pci_slot *slot;
@@ -2028,7 +2025,6 @@ void npu2_nvlink_create_phb(struct npu2 *npu, struct dt_node *dn)
 	list_head_init(&npu->phb_nvlink.devices);
 	list_head_init(&npu->phb_nvlink.virt_devices);
 
-	npu2_setup_irqs(npu);
 	npu2_populate_devices(npu, dn);
 	npu2_add_interrupt_map(npu, dn);
 	npu2_add_phb_properties(npu);
@@ -2302,6 +2298,13 @@ static int opal_npu_map_lpar(uint64_t phb_id, uint64_t bdf, uint64_t lparid,
 
 	NPU2DBG(p, "XTS_BDF_MAP[%03d] = 0x%08llx\n", id, xts_bdf_lpar);
 	npu2_write(p, NPU2_XTS_BDF_MAP + id*8, xts_bdf_lpar);
+
+	/* Reset wildcard in the PID map and the refcounter */
+	if (npu2_read(p, NPU2_XTS_PID_MAP + id*0x20) || p->ctx_ref[id]) {
+		prlog(PR_INFO, "Resetting PID MAP for LPID %lld\n", lparid);
+		p->ctx_ref[id] = 0;
+		npu2_write(p, NPU2_XTS_PID_MAP + id*0x20, 0);
+	}
 
 out:
 	unlock(&p->lock);

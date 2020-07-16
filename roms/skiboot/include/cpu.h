@@ -81,7 +81,7 @@ struct cpu_thread {
 	uint64_t			stack_bot_tok;
 #define CPU_BACKTRACE_SIZE	60
 	struct bt_entry			stack_bot_bt[CPU_BACKTRACE_SIZE];
-	unsigned int			stack_bot_bt_count;
+	struct bt_metadata		stack_bot_bt_metadata;
 #endif
 	struct lock			job_lock;
 	struct list_head		job_queue;
@@ -313,7 +313,6 @@ extern unsigned long __attrconst cpu_emergency_stack_top(unsigned int pir);
 extern void cpu_idle_job(void);
 extern void cpu_idle_delay(unsigned long delay);
 
-extern void cpu_set_radix_mode(void);
 extern void cpu_fast_reboot_complete(void);
 
 int dctl_set_special_wakeup(struct cpu_thread *t);

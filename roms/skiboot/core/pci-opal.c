@@ -246,18 +246,6 @@ static int64_t opal_pci_map_pe_mmio_window(uint64_t phb_id, uint64_t pe_number,
 }
 opal_call(OPAL_PCI_MAP_PE_MMIO_WINDOW, opal_pci_map_pe_mmio_window, 5);
 
-static int64_t opal_pci_set_phb_table_memory(uint64_t phb_id __unused,
-					     uint64_t rtt_addr __unused,
-					     uint64_t ivt_addr __unused,
-					     uint64_t ivt_len __unused,
-					     uint64_t rej_array_addr __unused,
-					     uint64_t peltv_addr __unused)
-{
-	/* IODA2 (P8) stuff, TODO */
-	return OPAL_UNSUPPORTED;
-}
-opal_call(OPAL_PCI_SET_PHB_TABLE_MEMORY, opal_pci_set_phb_table_memory, 6);
-
 static int64_t opal_pci_set_pe(uint64_t phb_id, uint64_t pe_number,
 			       uint64_t bus_dev_func, uint8_t bus_compare,
 			       uint8_t dev_compare, uint8_t func_compare,
@@ -333,26 +321,6 @@ static int64_t opal_pci_set_mve_enable(uint64_t phb_id, uint32_t mve_number,
 }
 opal_call(OPAL_PCI_SET_MVE_ENABLE, opal_pci_set_mve_enable, 3);
 
-static int64_t opal_pci_get_xive_reissue(uint64_t phb_id __unused,
-					 uint32_t xive_number __unused,
-					 uint8_t *p_bit __unused,
-					 uint8_t *q_bit __unused)
-{
-	/* IODA2 (P8) stuff, TODO */
-	return OPAL_UNSUPPORTED;
-}
-opal_call(OPAL_PCI_GET_XIVE_REISSUE, opal_pci_get_xive_reissue, 4);
-
-static int64_t opal_pci_set_xive_reissue(uint64_t phb_id __unused,
-					 uint32_t xive_number __unused,
-					 uint8_t p_bit __unused,
-					 uint8_t q_bit __unused)
-{
-	/* IODA2 (P8) stuff, TODO */
-	return OPAL_UNSUPPORTED;
-}
-opal_call(OPAL_PCI_SET_XIVE_REISSUE, opal_pci_set_xive_reissue, 4);
-
 static int64_t opal_pci_msi_eoi(uint64_t phb_id,
 				uint32_t hwirq)
 {
@@ -409,27 +377,6 @@ static int64_t opal_pci_set_xive_pe(uint64_t phb_id, uint64_t pe_number,
 	return rc;
 }
 opal_call(OPAL_PCI_SET_XIVE_PE, opal_pci_set_xive_pe, 3);
-
-static int64_t opal_get_xive_source(uint64_t phb_id, uint32_t xive_num,
-				    int32_t *interrupt_source_number)
-{
-	struct phb *phb = pci_get_phb(phb_id);
-	int64_t rc;
-
-	if (!opal_addr_valid(interrupt_source_number))
-		return OPAL_PARAMETER;
-
-	if (!phb)
-		return OPAL_PARAMETER;
-	if (!phb->ops->get_xive_source)
-		return OPAL_UNSUPPORTED;
-	phb_lock(phb);
-	rc = phb->ops->get_xive_source(phb, xive_num, interrupt_source_number);
-	phb_unlock(phb);
-
-	return rc;
-}
-opal_call(OPAL_GET_XIVE_SOURCE, opal_get_xive_source, 3);
 
 static int64_t opal_get_msi_32(uint64_t phb_id, uint32_t mve_number,
 			       uint32_t xive_num, uint8_t msi_range,
@@ -860,47 +807,6 @@ static int64_t opal_pci_set_power_state(uint64_t async_token,
 }
 opal_call(OPAL_PCI_SET_POWER_STATE, opal_pci_set_power_state, 3);
 
-static int64_t opal_pci_set_phb_tce_memory(uint64_t phb_id,
-					   uint64_t tce_mem_addr,
-					   uint64_t tce_mem_size)
-{
-	struct phb *phb = pci_get_phb(phb_id);
-	int64_t rc;
-
-	if (!phb)
-		return OPAL_PARAMETER;
-	if (!phb->ops->set_phb_tce_memory)
-		return OPAL_UNSUPPORTED;
-	phb_lock(phb);
-	rc = phb->ops->set_phb_tce_memory(phb, tce_mem_addr, tce_mem_size);
-	phb_unlock(phb);
-
-	return rc;
-}
-opal_call(OPAL_PCI_SET_PHB_TCE_MEMORY, opal_pci_set_phb_tce_memory, 3);
-
-static int64_t opal_pci_get_phb_diag_data(uint64_t phb_id,
-					  void *diag_buffer,
-					  uint64_t diag_buffer_len)
-{
-	struct phb *phb = pci_get_phb(phb_id);
-	int64_t rc;
-
-	if (!opal_addr_valid(diag_buffer))
-		return OPAL_PARAMETER;
-
-	if (!phb)
-		return OPAL_PARAMETER;
-	if (!phb->ops->get_diag_data)
-		return OPAL_UNSUPPORTED;
-	phb_lock(phb);
-	rc = phb->ops->get_diag_data(phb, diag_buffer, diag_buffer_len);
-	phb_unlock(phb);
-
-	return rc;
-}
-opal_call(OPAL_PCI_GET_PHB_DIAG_DATA, opal_pci_get_phb_diag_data, 3);
-
 static int64_t opal_pci_get_phb_diag_data2(uint64_t phb_id,
 					   void *diag_buffer,
 					   uint64_t diag_buffer_len)
@@ -947,37 +853,6 @@ static int64_t opal_pci_next_error(uint64_t phb_id, uint64_t *first_frozen_pe,
 	return rc;
 }
 opal_call(OPAL_PCI_NEXT_ERROR, opal_pci_next_error, 4);
-
-static int64_t opal_pci_eeh_freeze_status2(uint64_t phb_id, uint64_t pe_number,
-					   uint8_t *freeze_state,
-					   uint16_t *pci_error_type,
-					   uint16_t *severity,
-					   uint64_t *phb_status)
-{
-	struct phb *phb = pci_get_phb(phb_id);
-	int64_t rc;
-
-	if (!opal_addr_valid(freeze_state) || !opal_addr_valid(pci_error_type)
-		|| !opal_addr_valid(severity) || !opal_addr_valid(phb_status))
-		return OPAL_PARAMETER;
-
-	if (!phb)
-		return OPAL_PARAMETER;
-	if (!phb->ops->eeh_freeze_status)
-		return OPAL_UNSUPPORTED;
-	phb_lock(phb);
-
-	if (phb_status)
-		prlog(PR_ERR, "PHB#%04llx: %s: deprecated PHB status\n",
-				phb_id, __func__);
-
-	rc = phb->ops->eeh_freeze_status(phb, pe_number, freeze_state,
-					 pci_error_type, severity);
-	phb_unlock(phb);
-
-	return rc;
-}
-opal_call(OPAL_PCI_EEH_FREEZE_STATUS2, opal_pci_eeh_freeze_status2, 6);
 
 static int64_t opal_pci_set_phb_capi_mode(uint64_t phb_id, uint64_t mode, uint64_t pe_number)
 {

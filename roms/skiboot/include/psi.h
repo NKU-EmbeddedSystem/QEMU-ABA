@@ -54,7 +54,7 @@
 #define PSIHB_CR			0x20
 #define   PSIHB_CR_FSP_CMD_ENABLE	PPC_BIT(0)
 #define   PSIHB_CR_FSP_MMIO_ENABLE	PPC_BIT(1)
-#define   PSIHB_CR_TCE_ENABLE		PPC_BIT(2)	/* P7 only */
+#define   PSIHB_CR_TCE_ENABLE		PPC_BIT(2)
 #define   PSIHB_CR_FSP_IRQ_ENABLE	PPC_BIT(3)
 #define   PSIHB_CR_FSP_ERR_RSP_ENABLE	PPC_BIT(4)
 #define   PSIHB_CR_PSI_LINK_ENABLE	PPC_BIT(5)
@@ -80,9 +80,6 @@
 
 /* PSI Status / Error Mask Register */
 #define PSIHB_SEMR			0x28
-
-/* XIVR and BUID used for PSI interrupts on P7 */
-#define PSIHB_XIVR			0x30
 
 /* XIVR and BUID used for PSI interrupts on P8 */
 #define PSIHB_XIVR_FSP			0x30
@@ -123,13 +120,6 @@
 /*
  * PSI Host Bridge Registers (XSCOM)
  */
-#define PSIHB_XSCOM_P7_HBBAR		0x9
-#define   PSIHB_XSCOM_P7_HBBAR_EN	PPC_BIT(28)
-#define PSIHB_XSCOM_P7_HBCSR		0xd
-#define PSIHB_XSCOM_P7_HBCSR_SET	0x11
-#define PSIHB_XSCOM_P7_HBCSR_CLR	0x12
-#define   PSIHB_XSCOM_P7_HBSCR_FSP_IRQ 	PPC_BIT(13)
-
 #define PSIHB_XSCOM_P8_BASE		0xa
 #define   PSIHB_XSCOM_P8_HBBAR_EN	PPC_BIT(63)
 #define PSIHB_XSCOM_P8_HBCSR		0xe
@@ -165,8 +155,6 @@
 
 /*
  * Layout of the PSI DMA address space
- *
- * On P7, we instanciate a TCE table of 16K TCEs mapping 64M
  *
  * On P8, we use a larger mapping of 256K TCEs which provides
  * us with a 1G window in order to fit the trace buffers
@@ -233,6 +221,13 @@
 #define PSI_DMA_PLAT_REQ_BUF_SIZE	0x00001000
 #define PSI_DMA_PLAT_RESP_BUF		0x03301000
 #define PSI_DMA_PLAT_RESP_BUF_SIZE	0x00001000
+/*
+ * Our PRD interface can handle upto 64KB data transfer between
+ * OPAL - opal-prd. Hence adding TCE size as 68KB. If we increase
+ * OPAL - opal-prd message size, then we have to fix this.
+ */
+#define PSI_DMA_HBRT_FSP_MSG		0x03302000
+#define PSI_DMA_HBRT_FSP_MSG_SIZE	0x00011000
 
 /* P8 only mappings */
 #define PSI_DMA_TRACE_BASE		0x04000000
@@ -278,6 +273,6 @@ extern void psi_fsp_link_in_use(struct psi *psi);
 #define EXTERNAL_IRQ_POLICY_SKIBOOT	true
 extern void psi_set_external_irq_policy(bool policy);
 
-
+extern struct lock psi_lock;
 
 #endif /* __PSI_H */
