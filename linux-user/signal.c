@@ -660,15 +660,15 @@ static int pf_llsc_segfault_handler(int host_signum, siginfo_t *pinfo, void *puc
     ucontext_t *uc = (ucontext_t *)puc;
     unsigned long host_addr = (unsigned long)info->si_addr;
     unsigned long  guest_addr = h2g(host_addr);
-		CPUArchState *env = thread_cpu->env_ptr;
-		fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr,  ((CPUARMState*)env)->regs[15]);
+	CPUArchState *env = thread_cpu->env_ptr;
+	//fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr,  ((CPUARMState*)env)->regs[15]);
 	pthread_mutex_lock(&g_sc_lock);
 	target_ulong page_addr = guest_addr & 0xfffff000;
     int is_write = ((uc->uc_mcontext.gregs[REG_ERR] & 0x2) != 0);
 	
 	//assert(is_write == 1);
-    	CPUState *cpu = env_cpu(env);
-		//fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, perm %d, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr, is_write+1, ((CPUARMState*)env)->regs[15]);
+	CPUState *cpu = env_cpu(env);
+	//fprintf(stderr, "[pf_llsc_segfault_handler]\tthread %d tguest addr is %p, host_addr is %p, perm %d, guest pc %x\n", ((CPUARMState*)env)->exclusive_tid, (void *)guest_addr, (void*)host_addr, is_write+1, ((CPUARMState*)env)->regs[15]);
 	if (is_write) {
 		x_monitor_check_and_clean(((CPUARMState*)cpu)->exclusive_tid, guest_addr);
 		target_mprotect(page_addr, 0x1000, PROT_READ | PROT_WRITE);
