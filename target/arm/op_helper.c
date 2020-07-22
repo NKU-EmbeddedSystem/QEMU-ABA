@@ -1023,6 +1023,7 @@ void HELPER(print_aa32_addr)(uint32_t addr)
     fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
 }
 
+int fail_count = 0;
 pthread_mutex_t sc_mutex = PTHREAD_MUTEX_INITIALIZER;
 void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 {
@@ -1059,44 +1060,13 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, hash_entry %d, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
 #endif
+		__sync_fetch_and_add(&fail_count, 1);
         goto fail;
     }
-	/* Try to get spin lock */
-	/*
-	cas_ret = __atomic_compare_exchange((int*)g2h(hash_addr+4), 
-										(int*)&free,
-										(int*)&busy,
-										false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	if (cas_ret == false) {
-#ifdef LLSC_LOG
-	fprintf(stderr, "thread %d strex fail! get spin lock fail. val %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
-#endif
-        goto fail;
-    }
-	*/
-	/* TODO: replace mutex with this. */
-	/*
-	while (1) {
-	cas_ret = __atomic_compare_exchange((int*)g2h(hash_addr+4), 
-										(int*)&free,
-										(int*)&busy,
-										false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-	if (cas_ret == true) break;
-	}
-	*/
 
-	/* Now we got the lock */
-	/* Check hash entry again */
-	if (hash_entry != env->exclusive_tid) {
-#ifdef LLSC_LOG
-		fprintf(stderr, "thread %d strex fail! check again val %x, oldval %lx, hash_entry %d, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
-#endif
-
-        goto unlock;
-    }
     size = env->exclusive_info & 0xf;
 	/* limited to arm32 for now */
-	assert(size<3);
+	assert(size < 3);
     val = env->regs[(env->exclusive_info >> 8) & 0xf];
 	int x_val = env->exclusive_val;
 	cas_ret = __atomic_compare_exchange((uint32_t*)g2h(env->exclusive_addr), 
@@ -1107,15 +1077,13 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 #ifdef LLSC_LOG
 	fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
 #endif
-        goto unlock;
+        goto fail;
     }
     put_user_u32(env->exclusive_tid, hash_addr);
     rc = 0;
 #ifdef LLSC_LOG
 	fprintf(stderr, "thread %d strex suc! newval %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
 #endif
-unlock:
-	//*(int*)g2h(hash_addr+4) = 0;
 	
 fail:
     env->regs[15] += 4;
