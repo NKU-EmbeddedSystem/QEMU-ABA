@@ -1137,22 +1137,18 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
 
     addr = gen_aa32_addr(s, a32, opc);
 	/* A Hash approach to avoid ABA problem. */
-	/*
 #ifdef HASH_LLSC
     TCGv_i32 mask1 = tcg_const_i32(0x0ffffff0);
     TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
     TCGv_i32 hash_addr = tcg_temp_new_i32();
 
-    //tcg_gen_ldex_count(addr);
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
-    //tcg_gen_ldex_count(hash_addr);
     tcg_gen_qemu_st_i32(cpu_exclusive_tid, hash_addr, index, opc);
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
     tcg_temp_free(hash_addr);
 #endif 
-*/
     tcg_gen_qemu_st_i32(val, addr, index, opc);
     tcg_temp_free(addr);
 }
