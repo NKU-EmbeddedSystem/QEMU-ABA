@@ -696,7 +696,8 @@ DEF_HELPER_1(print_aa32_addr, void, i32)
 DEF_HELPER_1(hash_v2_store_exclusive, void, env)
 DEF_HELPER_0(sc_lock, void)
 DEF_HELPER_0(sc_unlock, void)
-
+DEF_HELPER_1(hash_check, i32, env)
+DEF_HELPER_0(xend, void)
 #ifdef TARGET_AARCH64
 #include "helper-a64.h"
 #include "helper-sve.h"

@@ -7463,19 +7463,6 @@ static void gen_logicq_cc(TCGv_i32 lo, TCGv_i32 hi)
    the architecturally mandated semantics, and avoids having to monitor
    regular stores.  The compare vs the remembered value is done during
    the cmpxchg operation, but we must compare the addresses manually.  */
-#ifdef ATOMIC_LDREX
-static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
-                               TCGv_i32 addr, int size)
-{
-    if (size == 3) {
-		fprintf(stderr, "! I don't wanna deal with this situation!\n");
-		exit(233);
-	}
-	tcg_gen_extu_i32_i64(cpu_exclusive_addr, addr);
-	tcg_gen_movi_i32(cpu_exclusive_info, rt);
-	gen_exception_internal_insn(s, 4, EXCP_LDREX);
-}
-#else
 static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i32 addr, int size)
 {
@@ -7535,38 +7522,27 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     store_reg(s, rt, tmp);
     tcg_gen_extu_i32_i64(cpu_exclusive_addr, addr);
 }
-#endif
 
 static void gen_clrex(DisasContext *s)
 {
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
 
-#ifdef HASH_V2
+/*#ifdef HASH_V2
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
 {
     tcg_gen_extu_i32_i64(cpu_exclusive_test, addr);
     tcg_gen_movi_i32(cpu_exclusive_info,
                      size | (rd << 4) | (rt << 8) | (rt2 << 12));
-    tcg_gen_hash_v2_store_exclusive(cpu_env);
+    gen_helper_hash_v2_store_exclusive(cpu_env);
 }
 
-#else
-#ifdef QEMU_LLSC
+#else*/
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
 {
-    tcg_gen_extu_i32_i64(cpu_exclusive_test, addr);
-    tcg_gen_movi_i32(cpu_exclusive_info,
-                     size | (rd << 4) | (rt << 8) | (rt2 << 12));
-    gen_exception_internal_insn(s, 4, EXCP_STREX);
-}
-#else
-static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
-                                TCGv_i32 addr, int size)
-{
-    TCGv_i32 t0, t1, t2;
+    TCGv_i32 t0, t1, t2, tmp;
     TCGv_i64 extaddr;
     TCGv taddr;
     TCGLabel *done_label;
@@ -7587,6 +7563,10 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_gen_extu_i32_i64(extaddr, addr);
     tcg_gen_brcond_i64(TCG_COND_NE, extaddr, cpu_exclusive_addr, fail_label);
     tcg_temp_free_i64(extaddr);
+	
+	tmp = tcg_temp_new_i32();
+	gen_helper_hash_check(tmp, cpu_env);
+	tcg_gen_brcondi_i32(TCG_COND_EQ, tmp, 0, fail_label);
 
     taddr = gen_aa32_addr(s, addr, opc);
     t0 = tcg_temp_new_i32();
@@ -7621,8 +7601,20 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
 
         tcg_temp_free_i64(o64);
     } else {
-        t2 = tcg_temp_new_i32();
-        tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
+		/*TCGv_i32 mask1 = tcg_const_i32(0x0ffffff0);
+		TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
+		TCGv_i32 hash_addr = tcg_temp_new_i32();
+
+		tcg_gen_and_i32(hash_addr, addr, mask1);
+		tcg_gen_or_i32(hash_addr, hash_addr, mask2);
+		tcg_gen_qemu_st_i32(cpu_exclusive_tid, hash_addr, index, opc);
+		tcg_temp_free(mask1);
+		tcg_temp_free(mask2);
+		tcg_temp_free(hash_addr);*/
+		//tcg_gen_qemu_st_i32(t1, taddr, get_mem_index(s), opc);
+
+		t2 = tcg_temp_new_i32();
+		tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
         tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
         tcg_gen_setcond_i32(TCG_COND_NE, t0, t0, t2);
         tcg_temp_free_i32(t2);
@@ -7630,16 +7622,18 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_temp_free_i32(t1);
     tcg_temp_free(taddr);
     tcg_gen_mov_i32(cpu_R[rd], t0);
+	//gen_helper_xend();
+    //tcg_gen_mov_i32(cpu_R[rd], 0);
     tcg_temp_free_i32(t0);
     tcg_gen_br(done_label);
 
     gen_set_label(fail_label);
     tcg_gen_movi_i32(cpu_R[rd], 1);
     gen_set_label(done_label);
+	gen_helper_sc_unlock();
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
-#endif
-#endif
+//#endif
 
 /* gen_srs:
  * @env: CPUARMState
