@@ -1021,6 +1021,11 @@ void HELPER(print_aa32_addr)(uint32_t addr)
     fprintf(stderr, "[print_aa32_addr]\taa32 addr = %x\n", addr);
 }
 
+void HELPER(print_val)(uint32_t val)
+{
+    fprintf(stderr, "[print_aa32_val] val = %x\n", val);
+}
+
 void HELPER(store_instrument)(uint32_t addr, uint32_t hash_addr)
 {
 	return;	
