@@ -273,7 +273,7 @@ static int do_strex(CPUARMState *env)
 	hash_addr = (addr & 0x0fffffff) | 0xa0000000;
 	segv = get_user_u32(hash_entry, hash_addr);
 	assert(segv == 0);
-	if ((hash_entry & 0x0fffffff) != env->exclusive_tid) {
+	if ((hash_entry & 0x0fffffff) != env->exclusive_tid || ((hash_entry & 0xf0000000) | hash_addr != addr)) {
 
 #ifdef LLSC_LOG
 		fprintf(stderr, "thread %d strex fail! val %lx, oldval %lx, hash_entry %x, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
