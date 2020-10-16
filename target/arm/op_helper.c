@@ -25,6 +25,7 @@
 #include "internals.h"
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
+#include "qemu.h"
 
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
@@ -1026,7 +1027,18 @@ void HELPER(print_val)(uint32_t val)
     fprintf(stderr, "[print_aa32_val] val = %x\n", val);
 }
 
-void HELPER(store_instrument)(uint32_t addr, uint32_t hash_addr)
+int conflict_count = 0;
+int store_count = 0;
+void HELPER(store_instrument)(uint32_t addr, uint32_t hash_addr, uint32_t id, uint32_t newval)
 {
-	return;	
+    __sync_fetch_and_add(&store_count, 1);
+    uint32_t hash_entry;
+    int segv = get_user_u32(hash_entry, hash_addr);
+    assert(segv == 0);
+    if(hash_entry != 0 && (hash_entry & 0xf0000000) != (addr & 0xf0000000))
+    {
+        // fprintf(stderr, "hash_addr %x\taddr %x\toldval %x\tid %x\tnewval %x\n", hash_addr, addr, hash_entry, id, newval);
+        __sync_fetch_and_add(&conflict_count, 1);
+    }
+    return;	
 }

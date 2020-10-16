@@ -1148,8 +1148,9 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
     //tcg_gen_ldex_count(addr);
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
+    gen_helper_store_instrument(addr, hash_addr, cpu_exclusive_tid, info);
     //tcg_gen_ldex_count(hash_addr);
-    tcg_gen_qemu_st_i32(cpu_exclusive_tid, hash_addr, index, opc);
+    tcg_gen_qemu_st_i32(info, hash_addr, index, opc);
 	tcg_temp_free(mask3);
 	tcg_temp_free(info);
     tcg_temp_free(mask1);
@@ -7500,8 +7501,10 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 #ifdef HASH_LLSC
 	tcg_gen_and_i32(info, addr, mask3);
 	tcg_gen_or_i32(info, info, cpu_exclusive_tid);
+    
     tcg_gen_and_i32(hash_addr, addr, mask1);
     tcg_gen_or_i32(hash_addr, hash_addr, mask2);
+    gen_helper_store_instrument(addr, hash_addr, cpu_exclusive_tid, info);
     gen_aa32_st32(s, info, hash_addr, get_mem_index(s));
     tcg_temp_free(mask1);
     tcg_temp_free(mask2);
