@@ -35,6 +35,5 @@ void preexit_cleanup(CPUArchState *env, int code)
 #ifdef CONFIG_GCOV
         __gcov_dump();
 #endif
-		fprintf(stderr, "fail count %d\n", fail_count);
         gdb_exit(env, code);
 }

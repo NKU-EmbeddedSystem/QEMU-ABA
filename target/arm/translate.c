@@ -7564,6 +7564,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_gen_brcond_i64(TCG_COND_NE, extaddr, cpu_exclusive_addr, fail_label);
     tcg_temp_free_i64(extaddr);
 	
+    /*HST Hash check*/
 	tmp = tcg_temp_new_i32();
 	gen_helper_hash_check(tmp, cpu_env);
 	tcg_gen_brcondi_i32(TCG_COND_EQ, tmp, 0, fail_label);
@@ -7601,18 +7602,6 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
 
         tcg_temp_free_i64(o64);
     } else {
-		/*TCGv_i32 mask1 = tcg_const_i32(0x0ffffff0);
-		TCGv_i32 mask2 = tcg_const_i32(0xa0000000);
-		TCGv_i32 hash_addr = tcg_temp_new_i32();
-
-		tcg_gen_and_i32(hash_addr, addr, mask1);
-		tcg_gen_or_i32(hash_addr, hash_addr, mask2);
-		tcg_gen_qemu_st_i32(cpu_exclusive_tid, hash_addr, index, opc);
-		tcg_temp_free(mask1);
-		tcg_temp_free(mask2);
-		tcg_temp_free(hash_addr);*/
-		//tcg_gen_qemu_st_i32(t1, taddr, get_mem_index(s), opc);
-
 		t2 = tcg_temp_new_i32();
 		tcg_gen_extrl_i64_i32(t2, cpu_exclusive_val);
         tcg_gen_atomic_cmpxchg_i32(t0, taddr, t2, t1, get_mem_index(s), opc);
@@ -7622,8 +7611,6 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_temp_free_i32(t1);
     tcg_temp_free(taddr);
     tcg_gen_mov_i32(cpu_R[rd], t0);
-	//gen_helper_xend();
-    //tcg_gen_mov_i32(cpu_R[rd], 0);
     tcg_temp_free_i32(t0);
     tcg_gen_br(done_label);
 

@@ -3023,11 +3023,6 @@ typedef void (*gen_atomic_op_i64)(TCGv_i64, TCGv_env, TCGv, TCGv_i64);
 # define WITH_ATOMIC64(X)
 #endif
 
-void tcg_gen_hash_v2_store_exclusive(TCGv_env env)
-{
-    gen_helper_hash_v2_store_exclusive(env);
-}
-
 void tcg_gen_ldex_count(TCGv addr)
 {
     gen_helper_offload_load_exclusive_count(addr);

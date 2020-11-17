@@ -1027,11 +1027,6 @@ void HELPER(print_aa32_addr)(uint32_t addr)
 int fail_count = 0;
 pthread_mutex_t sc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void HELPER(sc_lock)(void)
-{
-	//pthread_mutex_lock(&sc_mutex);
-}
-
 void HELPER(sc_unlock)(void)
 {
 	pthread_mutex_unlock(&sc_mutex);
@@ -1040,16 +1035,6 @@ void HELPER(sc_unlock)(void)
 const int max_tries = 100;
 uint32_t HELPER(hash_check)(CPUARMState *env)
 {
-	/*unsigned status;
-	for(int tries = 0; tries < max_tries; tries++){
-		status = _xbegin();
-		if(status == _XBEGIN_STARTED || !(status & _XABORT_RETRY)){
-			break;
-		}
-	}
-	if(status != _XBEGIN_STARTED)
-		return 0;*/
-
 	uint32_t hash_entry;
 	pthread_mutex_lock(&sc_mutex);
 	uint32_t addr = env->exclusive_addr;
@@ -1061,84 +1046,3 @@ uint32_t HELPER(hash_check)(CPUARMState *env)
 	return 1;
 }
 
-void HELPER(xend)(void)
-{
-	_xend();
-}
-
-#define LLSC_LOG
-void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
-{
-	int val;
-	int size;
-	int rc = 1;
-	//int segv = 0;
-	uint32_t addr;
-	uint32_t hash_addr;
-	uint32_t hash_entry;
-	int cas_ret;
-
-	//we should get lock here
-	unsigned status = _XABORT_EXPLICIT;
-	int tries;
-	for(tries = 0; tries < max_tries; tries++){
-		status = _xbegin();
-		if(status == _XBEGIN_STARTED || !(status & _XABORT_RETRY)){
-			break;
-		}
-	}
-
-	if(_xtest()){
-		//check addr == exclusive_addr
-		if (env->exclusive_addr != env->exclusive_test) {
-#ifdef LLSC_LOG
-			fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
-#endif
-			_xend();
-			goto fail;
-		}
-
-		//check hash_entry == exclusive_tid
-		addr = env->exclusive_addr;
-		hash_addr = (addr & 0x0ffffff0) | 0xa0000000;
-		get_user_u32(hash_entry, hash_addr);
-
-		if (hash_entry != env->exclusive_tid) {
-			_xend();
-#ifdef LLSC_LOG
-			fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, hash_entry %d, addr %x\n", env->exclusive_tid, val, env->exclusive_val, hash_entry, addr);
-#endif
-			__sync_fetch_and_add(&fail_count, 1);
-			goto fail;
-		}
-
-		size = env->exclusive_info & 0xf;
-		/* limited to arm32 for now */
-		assert(size < 3);
-		val = env->regs[(env->exclusive_info >> 8) & 0xf];
-		int x_val = env->exclusive_val;
-		cas_ret = __atomic_compare_exchange((uint32_t*)g2h(env->exclusive_addr), 
-				(uint32_t*)&x_val,
-				(uint32_t*)&val, 
-				false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
-		if (cas_ret == false) {
-			_xend();
-#ifdef LLSC_LOG
-			fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
-#endif
-			goto fail;
-		}
-		put_user_u32(env->exclusive_tid, hash_addr);
-		rc = 0;
-		_xend();
-#ifdef LLSC_LOG
-		fprintf(stderr, "thread %d strex suc! newval %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
-#endif
-	}//if _xbegin() == STARTED 
-
-fail:
-	env->regs[15] += 4;
-	env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
-
-	return;
-}
