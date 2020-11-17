@@ -1090,7 +1090,7 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 	}
 
 	if(_xtest()){
-//check addr == exclusive_addr
+		//check addr == exclusive_addr
 		if (env->exclusive_addr != env->exclusive_test) {
 #ifdef LLSC_LOG
 			fprintf(stderr, "thread %d strex fail! val %x, oldval %lx, addr %x\n", env->exclusive_tid, val, env->exclusive_val, addr);
@@ -1099,7 +1099,7 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 			goto fail;
 		}
 
-//check hash_entry == exclusive_tid
+		//check hash_entry == exclusive_tid
 		addr = env->exclusive_addr;
 		hash_addr = (addr & 0x0ffffff0) | 0xa0000000;
 		get_user_u32(hash_entry, hash_addr);
