@@ -1078,7 +1078,6 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 	uint32_t hash_entry;
 	int cas_ret;
 
-	pthread_mutex_lock(&sc_mutex);
 	//we should get lock here
 	unsigned status = _XABORT_EXPLICIT;
 	int tries;
@@ -1140,7 +1139,6 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 fail:
 	env->regs[15] += 4;
 	env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
-	pthread_mutex_unlock(&sc_mutex);
 
 	return;
 }
