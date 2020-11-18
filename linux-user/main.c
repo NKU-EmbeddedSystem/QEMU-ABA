@@ -79,7 +79,9 @@ void x_monitor_show(const char *info)
 		sprintf(buf, "%sthread %d x_addr %x x_page %x\n", buf, p->tid, p->exclusive_addr, p->page_addr);
 		p = p->next;
 	}
+#ifdef X_LOG
 	fprintf(stderr, "%s", buf);
+#endif
 }
 		
 
