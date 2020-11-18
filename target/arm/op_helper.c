@@ -1026,46 +1026,7 @@ void HELPER(print_aa32_addr)(uint32_t addr)
 
 int fail_count = 0;
 pthread_mutex_t sc_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void HELPER(sc_lock)(void)
-{
-	//pthread_mutex_lock(&sc_mutex);
-}
-
-void HELPER(sc_unlock)(void)
-{
-	pthread_mutex_unlock(&sc_mutex);
-}
-
 const int max_tries = 100;
-uint32_t HELPER(hash_check)(CPUARMState *env)
-{
-	/*unsigned status;
-	for(int tries = 0; tries < max_tries; tries++){
-		status = _xbegin();
-		if(status == _XBEGIN_STARTED || !(status & _XABORT_RETRY)){
-			break;
-		}
-	}
-	if(status != _XBEGIN_STARTED)
-		return 0;*/
-
-	uint32_t hash_entry;
-	pthread_mutex_lock(&sc_mutex);
-	uint32_t addr = env->exclusive_addr;
-	uint32_t hash_addr = (addr & 0x0ffffff0) | 0xa0000000;
-	get_user_u32(hash_entry, hash_addr);
-	if (hash_entry != env->exclusive_tid) 
-		return 0;
-
-	return 1;
-}
-
-void HELPER(xend)(void)
-{
-	_xend();
-}
-
 void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 {
 	int val;
@@ -1077,8 +1038,8 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 	uint32_t hash_entry;
 	int cas_ret;
 
-	pthread_mutex_lock(&sc_mutex);
 	//we should get lock here
+	pthread_mutex_lock(&sc_mutex);
 	unsigned status = _XABORT_EXPLICIT;
 	int tries;
 	for(tries = 0; tries < max_tries; tries++){
@@ -1139,7 +1100,7 @@ void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 fail:
 	env->regs[15] += 4;
 	env->regs[(env->exclusive_info >> 4) & 0xf] = rc;
+	
 	pthread_mutex_unlock(&sc_mutex);
-
 	return;
 }
