@@ -7164,6 +7164,7 @@ static void gen_logicq_cc(TCGv_i32 lo, TCGv_i32 hi)
    the architecturally mandated semantics, and avoids having to monitor
    regular stores.  The compare vs the remembered value is done during
    the cmpxchg operation, but we must compare the addresses manually.  */
+
 #define _HTM
 static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i32 addr, int size)
