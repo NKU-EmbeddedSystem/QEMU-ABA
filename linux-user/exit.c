@@ -35,6 +35,6 @@ void preexit_cleanup(CPUArchState *env, int code)
 #ifdef CONFIG_GCOV
         __gcov_dump();
 #endif
-        fprintf(stderr, "conflict count\t%d\tstore count\t%d\trate\t%lf\n", conflict_count, store_count, (double)conflict_count / store_count);
+//        fprintf(stderr, "conflict count\t%d\tstore count\t%d\trate\t%lf\n", conflict_count, store_count, (double)conflict_count / store_count);
         gdb_exit(env, code);
 }
