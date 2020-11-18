@@ -1011,7 +1011,6 @@ void HELPER(xbegin)(CPUARMState *env)
             retries--;
             goto retry;
         }
-        //stop_the_world_lock(env_cpu(env));
 		env->exclusive_addr = -1;
 		__sync_fetch_and_add(&abort_count, 1);
     }
@@ -1021,12 +1020,10 @@ void HELPER(xend)(void)
 {
     if (likely(htm_test())) {
         htm_end();
-    } else {
-        //stop_the_world_unlock();
-    }
+    } 
 }
 
 uint32_t HELPER(x_ok)(void)
 {
-    return likely(htm_test()) || stw_held;
+    return likely(htm_test());
 }

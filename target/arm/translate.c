@@ -7164,6 +7164,7 @@ static void gen_logicq_cc(TCGv_i32 lo, TCGv_i32 hi)
    the architecturally mandated semantics, and avoids having to monitor
    regular stores.  The compare vs the remembered value is done during
    the cmpxchg operation, but we must compare the addresses manually.  */
+
 #define _HTM
 static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i32 addr, int size)
@@ -7241,10 +7242,10 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_gen_brcond_i64(TCG_COND_NE, extaddr, cpu_exclusive_addr, fail_label);
     tcg_temp_free_i64(extaddr);
 #ifdef _HTM
-	//TCGv_i32 tmp = tcg_temp_new_i32();
+	TCGv_i32 tmp = tcg_temp_new_i32();
     /* strex without a prior ldrex should just fail */
-    //gen_helper_x_ok(tmp);
-    //tcg_gen_brcondi_i32(TCG_COND_EQ, tmp, 0, fail_label);
+    gen_helper_x_ok(tmp);
+    tcg_gen_brcondi_i32(TCG_COND_EQ, tmp, 0, fail_label);
 #endif	
 
     taddr = gen_aa32_addr(s, addr, opc);
