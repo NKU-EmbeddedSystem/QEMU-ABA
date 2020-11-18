@@ -1066,7 +1066,6 @@ void HELPER(xend)(void)
 	_xend();
 }
 
-#define LLSC_LOG
 void HELPER(hash_v2_store_exclusive)(CPUARMState *env)
 {
 	int val;
