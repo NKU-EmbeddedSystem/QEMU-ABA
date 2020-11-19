@@ -7528,7 +7528,7 @@ static void gen_clrex(DisasContext *s)
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
 
-/*#ifdef HASH_V2
+#ifdef HASH_V2
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
 {
@@ -7538,7 +7538,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     gen_helper_hash_v2_store_exclusive(cpu_env);
 }
 
-#else*/
+#else
 static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
                                 TCGv_i32 addr, int size)
 {
@@ -7633,7 +7633,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
 	gen_helper_sc_unlock();
     tcg_gen_movi_i64(cpu_exclusive_addr, -1);
 }
-//#endif
+#endif
 
 /* gen_srs:
  * @env: CPUARMState
