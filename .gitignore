@@ -43,6 +43,7 @@
 /qapi/qapi-visit-*.[ch]
 /qapi/qapi-visit.[ch]
 /qapi/qapi-doc.texi
+/qapi/error.json
 /qemu-doc.html
 /qemu-doc.info
 /qemu-doc.txt
