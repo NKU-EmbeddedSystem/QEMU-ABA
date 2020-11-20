@@ -35,6 +35,6 @@ void preexit_cleanup(CPUArchState *env, int code)
 #ifdef CONFIG_GCOV
         __gcov_dump();
 #endif
-		fprintf(stderr, "[x_mon]\tllsc_single=%lld, llsc_multi=%lld\n", llsc_single, llsc_multi);
+		//fprintf(stderr, "[x_mon]\tllsc_single=%lld, llsc_multi=%lld\n", llsc_single, llsc_multi);
         gdb_exit(env, code);
 }

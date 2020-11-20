@@ -87,7 +87,7 @@ void x_monitor_show(const char *info)
 		sprintf(buf, "%snode addr %p thread %d x_addr %x x_page %x\n", buf, p, p->tid, p->exclusive_addr, p->page_addr);
 		p = p->next;
 	}
-	fprintf(stderr, "%s", buf);
+	//fprintf(stderr, "%s", buf);
 }
 		
 
@@ -102,7 +102,9 @@ void* x_monitor_register_thread(int tid)
 	thread_count++;
 	if (thread_count == 1) {
 		ftime(&t_start);
+#ifdef X_LOG
 		fprintf(stderr, "[x_mon]\tprogram start!\n");
+#endif
 	}
 	if (thread_count>1)
 	if (!is_multi) {
@@ -111,7 +113,9 @@ void* x_monitor_register_thread(int tid)
 		int secDiff = t_multi_start.time - t_start.time;
 		secDiff *= 1000;
 		secDiff += (t_multi_start.millitm - t_start.millitm);
+#ifdef X_LOG
 		fprintf(stderr, "[x_mon]\tmulti thread begin! used: %dms\n", secDiff);
+#endif
 		t_single += secDiff;
 	}
 	x_node *p = malloc(sizeof(x_node));
@@ -140,7 +144,9 @@ int x_monitor_unregister_thread(int tid)
 		int secDiff = t_multi_end.time - t_multi_start.time;
 		secDiff *= 1000;
 		secDiff += (t_multi_end.millitm - t_multi_start.millitm);
+#ifdef X_LOG
 		fprintf(stderr, "[x_mon]\tmulti thread end! used: %dms\n", secDiff);
+#endif
 		t_multi += secDiff;
 	}
 	if (thread_count == 0) {
@@ -150,11 +156,13 @@ int x_monitor_unregister_thread(int tid)
 		secDiff *= 1000;
 		secDiff += (t_end.millitm - t_multi_end.millitm);
 		t_single += secDiff;
+#ifdef X_LOG
 		fprintf(stderr, "[x_mon]\tall thread end! used: %dms\n", secDiff);
 		double total = (double)t_single+(double)t_multi;
 		fprintf(stderr, "[x_mon]\tt_single=%lldms, t_multi=%lldms, single rate=%lf\n", 
 				t_single, t_multi, (double)t_single/total);
 		fprintf(stderr, "[x_mon]\tllsc_single=%lld, llsc_multi=%lld\n", llsc_single, llsc_multi);
+#endif
 	}
 
 

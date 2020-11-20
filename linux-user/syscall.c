@@ -7269,8 +7269,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 put_user_u32(0, ts->child_tidptr);
 				// TODO: Why put_user_u32 doesn't work?
 				*(int*)g2h(ts->child_tidptr) = 0;
-				fprintf(stderr, "child_ptr = %d\n", *(int*)g2h(ts->child_tidptr));
-				fprintf(stderr, "waking up parent\n");
+				//fprintf(stderr, "child_ptr = %d\n", *(int*)g2h(ts->child_tidptr));
+				//fprintf(stderr, "waking up parent\n");
                 sys_futex(g2h(ts->child_tidptr), FUTEX_WAKE, INT_MAX,
                           NULL, NULL, 0);
             }
