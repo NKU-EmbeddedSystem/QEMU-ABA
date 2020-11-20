@@ -7664,6 +7664,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_stime /* not on alpha */
     case TARGET_NR_stime:
         {
+            //
 			struct timespec ts;
 			ts.tv_nsec = 0;
             if (get_user_sal(ts.tv_sec, arg1))
