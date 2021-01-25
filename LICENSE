@@ -24,3 +24,5 @@ or directories: bsd-user/, linux-user/, hw/vfio/, hw/xen/xen_pt*.
 4) QEMU is a trademark of Fabrice Bellard.
 
 Fabrice Bellard and the QEMU team
+
+ In our modified version,we revised the following files:target/arm/translate.*(in which we chaged the process of load exclusive and store exclusive),target/op_helper.*(some helper functions were added),linux-user/main.c,linux-user/arm/cpu_loop.c(in which we added the treatment of the exclusiveness),linux-user/signal.c(in which we added the treatment of the page fault).
